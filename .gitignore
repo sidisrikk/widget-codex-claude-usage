@@ -1,0 +1,28 @@
+__pycache__/
+*.py[cod]
+*$py.class
+.DS_Store
+
+# Local credentials, environment files, and usage cache
+.env
+.env.*
+!.env.example
+.codex/
+auth.json
+codex_usage.json
+*.pem
+*.key
+
+# Editor and tool artifacts
+.omo/
+.opencode/state/*
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Test & coverage artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+node_modules/
