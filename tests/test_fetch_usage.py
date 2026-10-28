@@ -9,6 +9,7 @@ import ssl
 import tempfile
 import unittest
 import urllib.error
+import urllib.request
 from unittest.mock import Mock, patch
 
 
@@ -59,7 +60,7 @@ class FetchUsageTests(unittest.TestCase):
         self.tls = patch.object(backend.ssl, "create_default_context", return_value=Mock())
         self.tls.start()
         self.addCleanup(self.tls.stop)
-        self.network = patch.object(backend.urllib.request, "urlopen")
+        self.network = patch.object(urllib.request, "urlopen")
         self.urlopen = self.network.start()
         self.addCleanup(self.network.stop)
         self.urlopen.side_effect = AssertionError("Unconfigured mock request")

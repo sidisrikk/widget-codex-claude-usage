@@ -1,15 +1,15 @@
 {
     "KPlugin": {
-        "Description": "Displays Codex weekly rate limit and percentage left",
+        "Description": "Displays Codex weekly quota and Claude session/weekly limits side by side",
         "Icon": "utilities-system-monitor",
         "Id": "org.kde.plasma.codexusage",
         "License": "MIT",
-        "Name": "Codex Weekly Usage",
+        "Name": "Codex & Claude Usage",
         "Category": "Utilities",
         "ServiceTypes": [
             "Plasma/Applet"
         ],
-        "Version": "1.0",
+        "Version": "1.1",
         "Website": "https://github.com/sidisrikk/widget-codex-usage"
     },
     "X-Plasma-API": "declarativeappletscript",

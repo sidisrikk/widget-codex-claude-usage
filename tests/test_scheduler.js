@@ -3,15 +3,18 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const { execFileSync } = require('node:child_process');
-const qml = fs.readFileSync('contents/ui/main.qml', 'utf8');
-const fullQml = fs.readFileSync('contents/ui/FullRepresentation.qml', 'utf8');
+const qml = fs.readFileSync('contents/ui/UsageController.qml', 'utf8');
+const mainQml = fs.readFileSync('contents/ui/main.qml', 'utf8');
+const fullQml = fs.readFileSync('contents/ui/CodexSection.qml', 'utf8');
+const claudeQml = fs.readFileSync('contents/ui/ClaudeSection.qml', 'utf8');
+const headerQml = fs.readFileSync('contents/ui/SectionHeader.qml', 'utf8');
 const compactQml = fs.readFileSync('contents/ui/CompactRepresentation.qml', 'utf8');
 
-function block(start) {
-    const open = qml.indexOf('{', start);
+function block(start, source = qml) {
+    const open = source.indexOf('{', start);
     let depth = 1, quote = '', comment = '';
-    for (let i = open + 1; i < qml.length; i++) {
-        const ch = qml[i], next = qml[i + 1];
+    for (let i = open + 1; i < source.length; i++) {
+        const ch = source[i], next = source[i + 1];
         if (comment) {
             if (comment === 'line' && ch === '\n') comment = '';
             else if (comment === 'block' && ch === '*' && next === '/') { comment = ''; i++; }
@@ -22,22 +25,23 @@ function block(start) {
         else if (ch === '/' && next === '/') { comment = 'line'; i++; }
         else if (ch === '/' && next === '*') { comment = 'block'; i++; }
         else if (ch === '{') depth++;
-        else if (ch === '}' && --depth === 0) return qml.slice(open + 1, i);
+        else if (ch === '}' && --depth === 0) return source.slice(open + 1, i);
     }
     throw Error('Unclosed production block');
 }
 
-function harness() {
+function harness(provider = 'codex') {
     let now = 1000000;
     const launches = [], disconnects = [];
     const timer = { running: false, interval: 0, starts: 0,
         stop() { this.running = false; },
         restart() { this.running = true; this.starts++; } };
     const root = {};
+    const header = { controller: root };
     function MockDate(...args) { return args.length ? new Date(...args) : new Date(now); }
     MockDate.now = () => now;
-    const context = vm.createContext({ root, pollTimer: timer, Date: MockDate,
-        Qt: { resolvedUrl: () => 'file:///mock/fetch_usage.py', formatDateTime: date => `saved@${date.getTime() / 1000}` },
+    const context = vm.createContext({ controller: root, codex: root, claude: root, header, pollTimer: timer, Date: MockDate,
+        Qt: { resolvedUrl: url => 'file:///mock/' + url.split('/').pop(), formatDateTime: date => `saved@${date.getTime() / 1000}` },
         Plasmoid: { configuration: { showPercentageLeft: true }, setAction() {} },
         i18n: (text, ...args) => args.reduce((result, value, index) => result.replace(`%${index + 1}`, value), text),
         console: { warn() {} },
@@ -45,13 +49,14 @@ function harness() {
         disconnectSource: s => disconnects.push(s) });
     for (const match of qml.matchAll(/^\s*(readonly )?property \w+ (\w+): (.+)$/gm)) {
         if (match[1]) Object.defineProperty(root, match[2], {
-            get: () => vm.runInContext(`(function() { with (root) { return (${match[3]}); } })()`, context) });
+            get: () => vm.runInContext(`(function() { with (controller) { return (${match[3]}); } })()`, context) });
         else root[match[2]] = vm.runInContext(match[3], context);
     }
     for (const match of qml.matchAll(/function (\w+)\(([^)]*)\)\s*\{/g)) {
         const fn = vm.runInContext(`(function(${match[2]}) {${block(match.index)}})`, context);
         root[match[1]] = context[match[1]] = fn;
     }
+    root.provider = provider;
     const completion = vm.runInContext(`(function(sourceName, data) {${block(qml.indexOf('onNewData:'))}})`, context);
     const pollStart = qml.indexOf('id: pollTimer');
     const poll = vm.runInContext(`(function() {${block(qml.indexOf('onTriggered:', pollStart))}})`, context);
@@ -67,7 +72,7 @@ function harness() {
 }
 
 function evaluateBinding(source, expression, h) {
-    return vm.runInContext(`(function() { with (root) { return (${expression}); } })()`, h.context);
+    return vm.runInContext(`(function() { return (${expression}); })()`, h.context);
 }
 
 function failure(extra = {}) {
@@ -285,7 +290,7 @@ test('stale and unavailable notices, cooldown button, compact quota guards, and 
     h.root.refreshUsage(); h.deliver(failure({ status: 'error', retry_after_seconds: 30 }));
     assert.match(h.root.noticeText, /Showing saved quota from saved@111/);
     assert.match(h.root.noticeText, /Retry in 30 seconds/);
-    const enabled = fullQml.match(/enabled: (.+)/)[1];
+    const enabled = headerQml.match(/enabled: (.+)/)[1];
     assert.equal(evaluateBinding(fullQml, enabled, h), false);
     h.advance(10000); h.clock();
     assert.match(h.root.noticeText, /Retry in 20 seconds/);
@@ -295,8 +300,10 @@ test('stale and unavailable notices, cooldown button, compact quota guards, and 
     assert.match(noData.root.noticeText, /Quota unavailable/);
     assert.match(noData.root.noticeText, /Retry in 15 seconds/);
     assert.equal(noData.root.leftPercent, 100); // Stored default is never presented as a quota.
-    const displayExpression = compactQml.match(/readonly property int displayPercent: (.+)/)[1];
+    const displayExpression = compactQml.match(/function displayPercent\(usage\) \{\s*return (.+);/)[1]
+        .replace(/usage\./g, 'controller.');
     assert.equal(evaluateBinding(compactQml, displayExpression, noData), 0);
+    assert.equal(evaluateBinding(compactQml, displayExpression, h), 28);
     for (const [name, liveValue] of [['quotaValue', '28% left'], ['timeValue', '4d left']]) {
         const expression = fullQml.match(new RegExp(`objectName: "${name}"\\s+text: (.+)`))[1];
         assert.equal(evaluateBinding(fullQml, expression, noData), '—');
@@ -330,6 +337,153 @@ test('null reset remaining_seconds is unknown, not expired', () => {
     const expression = tooltipBlock.match(/var isExp = (.*);/)[1];
     const context = vm.createContext({ modelData: { countdown: 'Unknown', remaining_seconds: null } });
     assert.equal(vm.runInContext(expression, context), false);
+});
+
+function claudeWindow(extra = {}) {
+    return { id: 'weekly', label: 'Weekly', used_percent: 18, left_percent: 82, window_seconds: 604800,
+        reset_in: '4d 6h 10m', reset_formatted: 'Fri, 30 Oct 20:00', remaining_seconds: 367800,
+        time_left_percent: 60.8, time_left_text: '4.3d left', limit_reached: false, ...extra };
+}
+function claudeSnapshot(extra = {}) {
+    return { ...failure(), status: 'ok', retryable: false, has_data: true, plan: 'Pro',
+        used_percent: 64, left_percent: 36, limit_reached: false,
+        windows: [claudeWindow({ id: 'session', label: 'Session (5h)', used_percent: 64, left_percent: 36,
+            window_seconds: 18000, reset_in: '3h 12m', reset_formatted: 'Wed, 28 Oct 23:40',
+            remaining_seconds: 11520, time_left_percent: 64, time_left_text: '3.2h left' }), claudeWindow()],
+        updated_at: 111, updated_formatted: '12:34:56', ...extra };
+}
+function claudeHarness() {
+    const h = harness('claude'); h.root.displayName = 'Claude'; h.root.scriptName = 'fetch_claude_usage.py';
+    return h;
+}
+
+test('Claude snapshots validate per provider and hydrate only windows', () => {
+    const h = claudeHarness(); h.startup();
+    h.deliver(claudeSnapshot());
+    assert.equal(h.root.status, 'ok'); assert.equal(h.root.hasData, true);
+    assert.equal(h.root.leftPercent, 36); assert.equal(h.root.plan, 'Pro');
+    assert.equal(JSON.stringify(h.root.windowsList), JSON.stringify(claudeSnapshot().windows));
+    assert.equal(JSON.stringify(h.root.resetsList), '[]');
+    assert.equal(h.timer.interval, 600000);
+    const invalid = [snapshot(), claudeSnapshot({ windows: [] }), claudeSnapshot({ windows: [null] }),
+        claudeSnapshot({ windows: [claudeWindow({ time_left_percent: '1' })] }),
+        claudeSnapshot({ windows: [claudeWindow({ remaining_seconds: undefined })] }),
+        claudeSnapshot({ windows: [claudeWindow({ limit_reached: 'no' })] }),
+        claudeSnapshot({ windows: [claudeWindow({ reset_in: null })] }),
+        claudeSnapshot({ left_percent: Infinity }), claudeSnapshot({ plan: 7 })];
+    for (const data of invalid) {
+        const fresh = claudeHarness(); fresh.startup(); fresh.deliver(data);
+        assert.equal(fresh.root.status, 'error'); assert.equal(fresh.root.hasData, false);
+        h.root.refreshUsage(); h.deliver(data);
+        assert.equal(h.root.leftPercent, 36); assert.equal(h.root.windowsList.length, 2);
+    }
+    const codex = harness(); codex.startup(); codex.deliver(claudeSnapshot());
+    assert.equal(codex.root.status, 'error'); assert.equal(codex.root.hasData, false);
+    const unknown = claudeHarness(); unknown.startup();
+    unknown.deliver(claudeSnapshot({ windows: [claudeWindow({ remaining_seconds: null })] }));
+    assert.equal(unknown.root.status, 'ok');
+});
+
+test('Claude pairs gate placeholders, reset labels and per-window colors', () => {
+    const noData = claudeHarness(); noData.startup(); noData.deliver(failure({ status: 'auth_expired', retryable: false }));
+    const live = claudeHarness(); live.startup(); live.deliver(claudeSnapshot());
+    const modelExpression = claudeQml.match(/model: (claudeSection\.claude\.hasData .+)/)[1];
+    const quotaExpression = claudeQml.match(/objectName: "claudeQuotaValue"\s+text: (.+)/)[1];
+    const timeExpression = claudeQml.match(/objectName: "claudeTimeValue"\s+text: (.+)/)[1];
+    const resetExpression = claudeQml.match(/objectName: "claudeResetIn"\s+text: ([\s\S]+?)\n\s+font/)[1];
+    const placeholders = [{ id: 'session', label: 'Session (5h)' }, { id: 'weekly', label: 'Weekly' }];
+    for (const h of [noData, live]) {
+        h.context.claudeSection = { claude: h.root, placeholderWindows: placeholders };
+        h.context.pair = { live: h.root.hasData };
+    }
+    const models = evaluateBinding(claudeQml, modelExpression, noData);
+    assert.equal(models, placeholders);
+    assert.equal(noData.root.needsSignIn, true);
+    assert.equal(noData.root.statusSummary, 'Sign-in required');
+    for (const modelData of models) {
+        noData.context.modelData = modelData;
+        for (const expression of [quotaExpression, timeExpression, resetExpression]) {
+            assert.equal(evaluateBinding(claudeQml, expression, noData), '—');
+        }
+    }
+    const expected = [['36% left', '3.2h left', 'resets 3h 12m'], ['82% left', '4.3d left', 'resets 4d 6h 10m']];
+    evaluateBinding(claudeQml, modelExpression, live).forEach((modelData, index) => {
+        live.context.modelData = modelData;
+        assert.deepEqual([quotaExpression, timeExpression, resetExpression]
+            .map(expression => evaluateBinding(claudeQml, expression, live)), expected[index]);
+    });
+    live.context.modelData = claudeWindow({ reset_formatted: '--', reset_in: 'Not started' });
+    assert.equal(evaluateBinding(claudeQml, resetExpression, live), 'Not started');
+    assert.equal(live.root.colorFor(82, false), '#2ecc71');
+    assert.equal(live.root.colorFor(36, false), '#f39c12');
+    assert.equal(live.root.colorFor(20, false), '#e74c3c');
+    assert.equal(live.root.colorFor(90, true), '#e74c3c');
+    live.root.refreshUsage(); live.deliver({ ...claudeSnapshot(), status: 'offline', retryable: true, cached: true });
+    assert.equal(live.root.colorFor(90, false), '#f39c12');
+    assert.equal(noData.root.colorFor(90, false), '#e74c3c');
+});
+
+test('main refresh action and tooltip keep providers independent', () => {
+    const codex = harness(); codex.startup(); codex.deliver(snapshot());
+    codex.root.refreshUsage(); codex.deliver(failure({ status: 'error', retry_after_seconds: 120 }));
+    const claude = claudeHarness(); claude.startup(); claude.deliver(claudeSnapshot());
+    const main = vm.createContext({ codexUsage: codex.root, claudeUsage: claude.root,
+        i18n: (text, ...args) => args.reduce((result, value, index) => result.replace(`%${index + 1}`, value), text) });
+    const refreshAll = vm.runInContext(`(function() {${block(mainQml.indexOf('function action_refresh'), mainQml)}})`, main);
+    const toolTip = vm.runInContext(`(function(usage) {${block(mainQml.indexOf('function providerToolTip'), mainQml)}})`, main);
+    const enabled = headerQml.match(/enabled: (.+)/)[1];
+    codex.context.header = { controller: codex.root }; claude.context.header = { controller: claude.root };
+    assert.equal(evaluateBinding(headerQml, enabled, codex), false);
+    assert.equal(evaluateBinding(headerQml, enabled, claude), true);
+    refreshAll();
+    assert.equal(codex.launches.length, 2); assert.equal(codex.root.isRefreshing, false);
+    assert.equal(claude.launches.length, 2); assert.equal(claude.root.isRefreshing, true);
+    assert.match(claude.launches[1], /fetch_claude_usage\.py/);
+    assert.equal(evaluateBinding(headerQml, enabled, claude), false);
+    claude.deliver(claudeSnapshot({ updated_at: 222 }));
+    assert.match(toolTip(claude.root), /^Claude: 36% left\nSession \(5h\): 36% left · resets 3h 12m\nWeekly: 82% left/);
+    assert.match(toolTip(codex.root), /^Codex: Showing saved quota/);
+    assert.equal(codex.root.serverCooldownSeconds, 120); assert.equal(claude.root.serverCooldownSeconds, 0);
+});
+
+test('synthetic Claude backend JSON passes production validation', () => {
+    // Credentials, cache, TLS and HTTP are mocked in-process; the token is synthetic.
+    const payloads = JSON.parse(execFileSync('python3', ['-c', `
+import contextlib, importlib.util, io, json, time
+from unittest.mock import Mock, mock_open, patch
+spec = importlib.util.spec_from_file_location('claude', 'contents/scripts/fetch_claude_usage.py')
+backend = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(backend)
+future = int((time.time() + 3600) * 1000)
+usage = {'five_hour': {'utilization': 64.0, 'resets_at': '2099-01-01T00:00:00+00:00'},
+         'seven_day': {'utilization': 18.5, 'resets_at': None, 'locked_reason': None},
+         'seven_day_sonnet': {'utilization': 100, 'resets_at': '2000-01-01T00:00:00Z'},
+         'seven_day_opus': None, 'extra_usage': {'utilization': None}, 'limits': []}
+results = []
+for expires in (future, 0, None):
+    creds = {'claudeAiOauth': {'accessToken': 'synthetic', 'expiresAt': expires, 'subscriptionType': 'max'}}
+    out = io.StringIO()
+    with patch.object(backend, 'load_cache', return_value=None), \\
+         patch.object(backend.os.path, 'exists', return_value=True), \\
+         patch('builtins.open', mock_open(read_data=json.dumps(creds))), \\
+         patch.object(backend.ssl, 'create_default_context', return_value=Mock()), \\
+         patch.object(backend, 'request_json', return_value=usage), \\
+         patch.object(backend, 'save_cache'), contextlib.redirect_stdout(out):
+        backend.fetch()
+    results.append(json.loads(out.getvalue()))
+print(json.dumps(results, allow_nan=False))
+`], { encoding: 'utf8' }));
+    assert.deepEqual(payloads.map(payload => payload.status), ['ok', 'auth_expired', 'ok']);
+    for (const payload of payloads) {
+        const h = claudeHarness(); h.startup(); h.deliver(payload);
+        assert.equal(h.root.status, payload.status);
+        assert.equal(h.root.hasData, payload.status === 'ok');
+        if (payload.status !== 'ok') continue;
+        assert.equal(h.root.validSnapshot(payload), true);
+        assert.equal(h.root.plan, 'Max'); assert.equal(h.root.leftPercent, 0);
+        assert.equal(h.root.limitReached, true);
+        assert.equal(h.root.windowsList.map(window => window.id).join(), 'session,weekly,weekly_sonnet');
+    }
 });
 
 for (const [name, fn] of tests) { fn(); console.log(`PASS ${name}`); }
