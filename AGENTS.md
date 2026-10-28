@@ -1,7 +1,7 @@
 # PROJECT KNOWLEDGE BASE
 
-**Generated:** 2026-10-13
-**Commit:** 80f5ebe
+**Generated:** 2026-10-28
+**Commit:** b9c2361
 **Branch:** main
 
 ## OVERVIEW
@@ -35,10 +35,10 @@ widget-codex-usage/
 
 | Task | Location | Notes |
 |------|----------|-------|
-| Codex auth, HTTP, cache, payload | `contents/scripts/fetch_usage.py` | Stdlib only; quota required, credit request optional |
-| Claude auth, HTTP, cache, windows | `contents/scripts/fetch_claude_usage.py` | Reads `~/.claude/.credentials.json` only; expired token → `auth_expired` without request |
-| Shared fetch helpers | `contents/scripts/usage_common.py` | `run()` classifies failures (403 → `auth_error`) and prints one JSON object; `write_json_atomic()` fsyncs and replaces caches |
-| State, retries, response validation | `contents/ui/UsageController.qml` | One instance per provider; owns executable source, deadlines, snapshot age |
+| Codex auth, HTTP, cache, payload | `contents/scripts/fetch_usage.py` | Stdlib only; quota required, credit request optional; validates 0..100% ranges and positive durations; delegates atomic write and format to usage_common.py |
+| Claude auth, HTTP, cache, windows | `contents/scripts/fetch_claude_usage.py` | Reads `~/.claude/.credentials.json` only; expired token → `auth_expired` without request; validates 0..100% and strict boolean `has_data` |
+| Shared fetch helpers | `contents/scripts/usage_common.py` | `run()` classifies failures (401 → `auth_expired`, 403 → `auth_error`) and prints one JSON object; `write_json_atomic()` fsyncs and replaces caches; integer `format_relative_time()` |
+| State, retries, response validation | `contents/ui/UsageController.qml` | One instance per provider; owns executable source, `shellQuote` (URL-decoded, apostrophe-safe), deadlines, snapshot age, `colorFor` |
 | Provider wiring, tooltip, refresh action | `contents/ui/main.qml` | Exposes `root.codex`, `root.claude`, `root.providers` |
 | Panel gauges and percentages | `contents/ui/CompactRepresentation.qml`, `contents/ui/UsageRing.qml` | One ring per provider; horizontal/vertical layouts; hides unavailable quota |
 | Popup layout | `contents/ui/FullRepresentation.qml` | Stacks `CodexSection` and `ClaudeSection` |
@@ -48,7 +48,7 @@ widget-codex-usage/
 | Settings | `contents/ui/configGeneral.qml`, `contents/config/main.xml` | Keep `cfg_*` aliases and schema names aligned |
 | Settings category | `contents/config/config.qml` | Registers `configGeneral.qml` as General |
 | Plugin entry and packaging | `metadata.json`, `install.sh` | `X-Plasma-MainScript` is `ui/main.qml` |
-| Fast regressions | `tests/test_fetch_usage.py`, `tests/test_fetch_claude_usage.py`, `tests/test_scheduler.js` | Mocked HTTP/time and production-function VM |
+| Fast regressions | `tests/test_fetch_usage.py`, `tests/test_fetch_claude_usage.py`, `tests/test_scheduler.js` | Mocked HTTP/time, fsync/atomic replace, strict validation and production-function VM |
 | Native runtime regressions | `tests/native/check.sh`, `tests/native/tst_smoke.qml` | Real Qt5/KF5 modules; disposable production copy |
 | Native dependencies and shell fixture | `tests/native/Dockerfile`, `tests/native/runner.cpp` | Executable data engine needs `plasma-workspace` |
 | Qt5 tool/runtime validation | `tests/native/preflight.sh`, `tests/native/test-preflight.sh` | Linkage, runtime-major checks and negative probes |
@@ -60,21 +60,29 @@ Python definitions/imports were checked with AST search; JavaScript symbols/refe
 
 | Symbol | Type | Location | Refs | Role |
 |--------|------|----------|------|------|
-| `run` | Function | `contents/scripts/usage_common.py` | Unmeasured | Classifies failures and prints one JSON result |
+| `run` | Function | `contents/scripts/usage_common.py` | Unmeasured | Classifies failures (401, 403, network, TLS) and prints one JSON result |
+| `write_json_atomic` | Function | `contents/scripts/usage_common.py` | Unmeasured | Fsyncs temporary file and replaces destination cache atomically |
+| `format_relative_time` | Function | `contents/scripts/usage_common.py` | Unmeasured | Formats fractional durations as whole integer seconds |
 | `fetch` | Function | `contents/scripts/fetch_usage.py`, `fetch_claude_usage.py` | Unmeasured | Calls `run` with provider-specific loaders/messages |
 | `fetch_result` | Function | `contents/scripts/fetch_usage.py` | Unmeasured | Reads credentials and requests live quota |
-| `build_snapshot` | Function | `contents/scripts/fetch_usage.py` | Unmeasured | Builds quota, cycle and sorted reset entries |
-| `valid_cached_snapshot` | Function | `contents/scripts/fetch_usage.py` | Unmeasured | Matches frontend snapshot shape |
+| `build_snapshot` | Function | `contents/scripts/fetch_usage.py` | Unmeasured | Builds quota, cycle and sorted reset entries; validates 0..100% and durations |
+| `valid_cached_snapshot` | Function | `contents/scripts/fetch_usage.py`, `fetch_claude_usage.py` | Unmeasured | Enforces strict boolean `has_data is True` and `0 <= used_percent, left_percent <= 100` |
 | `parse_retry_after` | Function | `contents/scripts/usage_common.py` | Unmeasured | Parses seconds or HTTP date for 429 cooldown |
 | `build_window` | Function | `contents/scripts/fetch_claude_usage.py` | Unmeasured | Maps one Claude limit window to a quota/time pair |
+| `shellQuote` | Function | `contents/ui/UsageController.qml` | Unmeasured | URL-decodes and single-quotes script paths safely including apostrophes |
 | `harness` | Function | `tests/test_scheduler.js` | Unmeasured | Runs extracted `UsageController.qml` functions/bindings per provider with fake time |
 
 ## CONVENTIONS
 
 - Settings defaults: `refreshInterval=600`, `showPercentageLeft=true`, `warningThreshold=20`; shared by both providers; the form binds strictly through `cfg_<entryName>` aliases.
 - Use `PlasmaCore.Units` and `PlasmaCore.Theme` for layout/font/theming changes; wrap QML user-facing text in `i18n`.
-- Status colors (`UsageController.colorFor`): red for auth errors, reached limits or quota at/below configured threshold; offline is orange; remaining quota above threshold through 40% is orange, above 40% green. Claude's top-level `left_percent` is the lowest window.
+- Status colors (`UsageController.colorFor`): red for auth errors (`auth_error`, `auth_expired`, `no_auth`, `no_token`), reached limits or quota at/below configured threshold; offline is orange; remaining quota above threshold through 40% is orange, above 40% green. Claude's top-level `left_percent` is the lowest window.
 - Fetcher stdout is one finite JSON object. Diagnostics use stderr; serialization uses `allow_nan=False`.
+- Percentage ranges: `used_percent` and `left_percent` must be finite numbers in `0..100` across live snapshots and cache validators.
+- Cache writes: always use atomic replacement (`usage_common.write_json_atomic`) via temporary sibling file, explicit `fsync`, and `os.replace`.
+- Cache validation: `has_data` must be boolean `True` strictly (`data.get("has_data") is True`), rejecting truthy strings or objects.
+- Script paths: `UsageController` resolves script URLs via `Qt.resolvedUrl`, decodes URI encoding (`decodeURIComponent`), and shell-quotes via `shellQuote` to handle spaces and apostrophes safely.
+- Relative durations: fractional seconds are truncated to whole integer seconds before formatting as compact countdown strings.
 - Unknown reset countdowns use JSON `null`, never Infinity; credit records require string IDs. Legacy cache normalization happens in `load_cache`.
 
 ## ANTI-PATTERNS (THIS PROJECT)
@@ -86,6 +94,11 @@ Python definitions/imports were checked with AST search; JavaScript symbols/refe
 - Never let optional reset-credit failures invalidate an otherwise successful quota request.
 - Never refresh, rotate or write Claude Code credentials; Claude Code owns token renewal.
 - Never couple providers: one provider's request, backoff or cooldown must not block the other's refresh.
+- Never write cache files in place without atomic fsync and replace (`write_json_atomic`).
+- Never evaluate cache `has_data` with loose truthiness; enforce `has_data is True`.
+- Never accept unconstrained percentages outside 0..100 in quota payloads or cache validation.
+- Never map HTTP 403 to generic error: 403 is `auth_error` requiring re-login.
+- Never pass raw, unquoted, or URL-escaped script paths to `executableSource`.
 - Never make popup geometry depend on fetch status: retain the fixed-height header statuses. The reset list and Claude pairs fit without scrolling; Claude placeholders reserve the two-window size.
 - Native checks must not mount host credentials/cache or alter production QML; only the backends in the disposable copy are replaced.
 - Keep `contents/scripts/fetch_usage.py`, `contents/scripts/fetch_claude_usage.py` and `install.sh` executable.
