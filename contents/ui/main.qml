@@ -66,7 +66,8 @@ Item {
     Plasmoid.fullRepresentation: FullRepresentation {}
 
     function getStatusColor() {
-        if (status === "auth_expired" || status === "auth_error" || limitReached) {
+        if (status === "auth_error" || status === "auth_expired"
+                || status === "no_auth" || status === "no_token" || limitReached) {
             return "#e74c3c"; // Red
         }
         if (status === "offline") {
@@ -115,10 +116,15 @@ Item {
         root.nextRefreshAt = 0;
         root.isRefreshing = true;
         var scriptUrl = Qt.resolvedUrl("../scripts/fetch_usage.py").toString();
-        var scriptPath = scriptUrl.replace(/^file:\/\//, "");
-        root.activeUsageSource = "python3 '" + scriptPath + "'";
+        // QUrl strings escape spaces and other characters; decode before shell quoting.
+        var scriptPath = decodeURIComponent(scriptUrl.replace(/^file:\/\//, ""));
+        root.activeUsageSource = "python3 " + root.shellQuote(scriptPath);
         executableSource.connectSource(root.activeUsageSource);
         return true;
+    }
+
+    function shellQuote(value) {
+        return "'" + String(value).split("'").join("'\\''") + "'";
     }
 
     function launchCodex() {

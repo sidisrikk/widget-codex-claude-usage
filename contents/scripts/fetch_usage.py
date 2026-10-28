@@ -14,6 +14,7 @@ import urllib.error
 import ssl
 import math
 import http.client
+import tempfile
 from email.utils import parsedate_to_datetime
 from datetime import datetime, timezone
 
@@ -24,7 +25,8 @@ CREDITS_URL = "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits"
 
 def valid_cached_snapshot(data):
     """Match the frontend snapshot contract before attaching cached quota."""
-    if not isinstance(data, dict) or not isinstance(data.get("resets"), list):
+    if (not isinstance(data, dict) or data.get("has_data") is not True
+            or not isinstance(data.get("resets"), list)):
         return False
     def number(value):
         return not isinstance(value, bool) and isinstance(value, (int, float)) and math.isfinite(value)
@@ -34,6 +36,8 @@ def valid_cached_snapshot(data):
     if not all(number(data.get(key)) for key in
                ("used_percent", "left_percent", "cycle_elapsed_percent",
                 "cycle_elapsed_days", "cycle_remaining_days", "updated_at")):
+        return False
+    if not all(0 <= data[key] <= 100 for key in ("used_percent", "left_percent")):
         return False
     if data["updated_at"] < 0 or not all(isinstance(data.get(key), bool) for key in ("allowed", "limit_reached")):
         return False
@@ -61,21 +65,38 @@ def load_cache():
                         if isinstance(reset, dict) and reset.get("kind") == "credit" and not isinstance(reset.get("id"), str):
                             reset["id"] = f"credit_{index}"
                 json.dumps(data, allow_nan=False)
-                if valid_cached_snapshot(data) and data.get("has_data", True):
+                if valid_cached_snapshot(data):
                     return data
         except Exception:
             return None
     return None
 
 def save_cache(data):
+    temporary_path = None
     try:
-        os.makedirs(os.path.dirname(CACHE_FILE), exist_ok=True)
-        with open(CACHE_FILE, "w", encoding="utf-8") as f:
+        cache_directory = os.path.dirname(CACHE_FILE) or "."
+        os.makedirs(cache_directory, exist_ok=True)
+        with tempfile.NamedTemporaryFile(
+                "w", encoding="utf-8", dir=cache_directory,
+                prefix=f".{os.path.basename(CACHE_FILE)}.", suffix=".tmp",
+                delete=False) as f:
+            temporary_path = f.name
             json.dump(data, f, indent=2, allow_nan=False)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(temporary_path, CACHE_FILE)
+        temporary_path = None
     except Exception as e:
+        if temporary_path is not None:
+            try:
+                os.unlink(temporary_path)
+            except OSError:
+                pass
         sys.stderr.write(f"Warning: Failed to write cache: {e}\n")
 
 def format_relative_time(seconds):
+    # API durations can be fractional. Keep the user-facing countdown compact.
+    seconds = int(seconds)
     if seconds <= 0:
         return "now"
     days = seconds // 86400
@@ -103,14 +124,24 @@ def build_snapshot(data, credits_list):
     rate_limit = data.get("rate_limit", {})
     primary = rate_limit.get("primary_window", {}) or {}
 
+    plan = data.get("plan_type", "Standard")
+    allowed = rate_limit.get("allowed", True)
+    limit_reached = rate_limit.get("limit_reached", False)
+    if not isinstance(plan, str) or not isinstance(allowed, bool) or not isinstance(limit_reached, bool):
+        raise ValueError("Invalid quota metadata")
+
     used_pct = primary["used_percent"]
-    left_pct = max(0, 100 - used_pct)
     reset_at = primary.get("reset_at")
     reset_seconds = primary.get("reset_after_seconds", 0)
     limit_window = primary.get("limit_window_seconds", 604800)
     for value in (used_pct, reset_seconds, limit_window):
         if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
             raise ValueError("Invalid quota number")
+    if not 0.0 <= used_pct <= 100.0:
+        raise ValueError("Invalid used percentage")
+    if reset_seconds < 0 or limit_window <= 0:
+        raise ValueError("Invalid quota duration")
+    left_pct = 100 - used_pct
 
     # 7-day cycle calculations
     elapsed_seconds = max(0, limit_window - reset_seconds)
@@ -217,7 +248,7 @@ def build_snapshot(data, credits_list):
         "retryable": False,
         "retry_after_seconds": None,
         "attempted_at": now_ts,
-        "plan": data.get("plan_type", "Standard"),
+        "plan": plan,
         "used_percent": used_pct,
         "left_percent": left_pct,
         "cycle_elapsed_percent": round(cycle_elapsed_pct, 1),
@@ -226,8 +257,8 @@ def build_snapshot(data, credits_list):
         "reset_in": reset_in_str,
         "reset_formatted": reset_formatted,
         "resets": resets,
-        "allowed": rate_limit.get("allowed", True),
-        "limit_reached": rate_limit.get("limit_reached", False),
+        "allowed": allowed,
+        "limit_reached": limit_reached,
         "updated_at": now_ts,
         "updated_formatted": datetime.fromtimestamp(now_ts).strftime("%H:%M:%S"),
     }
@@ -314,7 +345,8 @@ def fetch():
             message = "Auth token expired. Please run 'codex login'."
         elif e.code == 403:
             message = "Access denied. Check your Codex account and log in again."
-        result = failure(cached, "auth_expired" if e.code == 401 else "error",
+        status = "auth_expired" if e.code == 401 else "auth_error" if e.code == 403 else "error"
+        result = failure(cached, status,
                          message, retryable, retry_after)
     except (http.client.IncompleteRead, ssl.SSLEOFError):
         result = failure(cached, "offline", "Network connection interrupted.", True)

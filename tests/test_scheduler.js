@@ -37,7 +37,7 @@ function harness() {
     function MockDate(...args) { return args.length ? new Date(...args) : new Date(now); }
     MockDate.now = () => now;
     const context = vm.createContext({ root, pollTimer: timer, Date: MockDate,
-        Qt: { resolvedUrl: () => 'file:///mock/fetch_usage.py', formatDateTime: date => `saved@${date.getTime() / 1000}` },
+        Qt: { resolvedUrl: () => 'file:///mock/fetch%20usage.py', formatDateTime: date => `saved@${date.getTime() / 1000}` },
         Plasmoid: { configuration: { showPercentageLeft: true }, setAction() {} },
         i18n: (text, ...args) => args.reduce((result, value, index) => result.replace(`%${index + 1}`, value), text),
         console: { warn() {} },
@@ -149,6 +149,24 @@ test('unconditional disconnect, duplicate completions and launchCodex isolation'
     assert.equal(h.root.nextRefreshAt, deadline); assert.equal(h.root.retryCount, 1);
     assert.equal(h.timer.starts, 1); assert.equal(h.disconnects.length, 4);
     assert.equal(h.root.hasData, false);
+});
+
+test('executable paths are shell-quoted including apostrophes', () => {
+    const h = harness(); h.startup();
+    assert.equal(h.launches[0], "python3 '/mock/fetch usage.py'");
+    assert.equal(h.root.shellQuote("/tmp/Codex user's/fetch usage.py"),
+        "'/tmp/Codex user'\\''s/fetch usage.py'");
+});
+test('all authentication and sign-in states are red', () => {
+    const h = harness();
+    const start = qml.indexOf('function getStatusColor');
+    const getStatusColor = vm.runInContext(
+        `(function() { with (root) {${block(start)}} })`, h.context);
+    h.root.leftPercent = 75; h.root.limitReached = false;
+    for (const status of ['auth_error', 'auth_expired', 'no_auth', 'no_token']) {
+        h.root.status = status;
+        assert.equal(getStatusColor(), '#e74c3c', status);
+    }
 });
 test('full cache hydration on startup, no-data and invalid-snapshot memory preservation', () => {
     const h = harness(); h.startup();

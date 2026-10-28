@@ -104,6 +104,8 @@ class FetchUsageTests(unittest.TestCase):
 
     def test_invalid_cache_schema_does_not_poison_network_retry(self):
         for field, value in (("plan", None), ("updated_at", -1), ("used_percent", True),
+                             ("used_percent", -0.1), ("left_percent", 100.1),
+                             ("has_data", 1), ("has_data", False),
                              ("allowed", "yes"), ("resets", [None]), ("cycle_elapsed_days", "old")):
             with self.subTest(field=field):
                 snapshot = self.seed_cache()
@@ -114,6 +116,22 @@ class FetchUsageTests(unittest.TestCase):
                 self.assertTrue(result["retryable"])
                 self.assertFalse(result["has_data"])
                 self.assertIsNone(result["updated_at"])
+
+    def test_cached_percentages_and_has_data_use_strict_validation(self):
+        snapshot = backend.build_snapshot(copy.deepcopy(USAGE), [])
+        self.assertTrue(backend.valid_cached_snapshot(snapshot))
+        for field, value in (("used_percent", -0.1), ("used_percent", 100.1),
+                             ("left_percent", -0.1), ("left_percent", 100.1),
+                             ("used_percent", float("inf")), ("left_percent", float("nan")),
+                             ("has_data", 1), ("has_data", "true"), ("has_data", False),
+                             ("has_data", None)):
+            with self.subTest(field=field, value=value):
+                candidate = copy.deepcopy(snapshot)
+                if value is None:
+                    candidate.pop(field)
+                else:
+                    candidate[field] = value
+                self.assertFalse(backend.valid_cached_snapshot(candidate))
 
     def assert_preserved(self, result, snapshot):
         overrides = {"status", "error_message", "cached", "has_data", "retryable",
@@ -155,7 +173,8 @@ class FetchUsageTests(unittest.TestCase):
                 self.urlopen.side_effect = http_error(code, "60")
                 result = self.run_fetch()
                 self.assertEqual(result["retryable"], code in (408, 429) or 500 <= code <= 599)
-                self.assertEqual(result["status"], "auth_expired" if code == 401 else "error")
+                expected_status = "auth_expired" if code == 401 else "auth_error" if code == 403 else "error"
+                self.assertEqual(result["status"], expected_status)
                 self.assertEqual(result["retry_after_seconds"], 60 if code == 429 else None)
                 if code in (401, 403):
                     self.assertIn("log", result["error_message"])
@@ -272,6 +291,58 @@ class FetchUsageTests(unittest.TestCase):
                 self.assertFalse(result["has_data"])
                 self.assertFalse(self.cache.exists())
 
+    def test_invalid_cycle_durations_are_rejected_as_invalid_responses(self):
+        for reset_after, window in ((-1, 604800), (1, 0), (1, -604800)):
+            with self.subTest(reset_after=reset_after, window=window):
+                usage = copy.deepcopy(USAGE)
+                primary = usage["rate_limit"]["primary_window"]
+                primary["reset_after_seconds"] = reset_after
+                primary["limit_window_seconds"] = window
+                self.urlopen.side_effect = [response(usage), response({"credits": []})]
+                result = self.run_fetch()
+                self.assertEqual(result["status"], "error")
+                self.assertFalse(result["has_data"])
+                self.assertFalse(result["retryable"])
+                self.assertFalse(self.cache.exists())
+
+    def test_used_percentage_must_be_within_quota_range(self):
+        for used_percent in (-0.1, 100.1):
+            with self.subTest(used_percent=used_percent):
+                usage = copy.deepcopy(USAGE)
+                usage["rate_limit"]["primary_window"]["used_percent"] = used_percent
+                with self.assertRaises(ValueError):
+                    backend.build_snapshot(usage, [])
+                self.urlopen.side_effect = [response(usage), response({"credits": []})]
+                result = self.run_fetch()
+                self.assertEqual(result["status"], "error")
+                self.assertFalse(result["has_data"])
+                self.assertFalse(self.cache.exists())
+        for used_percent in (0.0, 100.0):
+            with self.subTest(boundary=used_percent):
+                usage = copy.deepcopy(USAGE)
+                usage["rate_limit"]["primary_window"]["used_percent"] = used_percent
+                snapshot = backend.build_snapshot(usage, [])
+                self.assertEqual(snapshot["used_percent"], used_percent)
+                self.assertEqual(snapshot["left_percent"], 100.0 - used_percent)
+
+    def test_invalid_quota_metadata_is_not_cached_as_success(self):
+        for field, value in (("plan_type", {"unexpected": "object"}),
+                             ("allowed", "yes"), ("limit_reached", 0)):
+            with self.subTest(field=field):
+                usage = copy.deepcopy(USAGE)
+                if field == "plan_type":
+                    usage[field] = value
+                else:
+                    usage["rate_limit"][field] = value
+                self.urlopen.side_effect = [response(usage), response({"credits": []})]
+                result = self.run_fetch()
+                self.assertEqual(result["status"], "error")
+                self.assertFalse(result["has_data"])
+                self.assertFalse(self.cache.exists())
+
+    def test_fractional_relative_time_is_formatted_as_whole_seconds(self):
+        self.assertEqual(backend.format_relative_time(90061.9), "1d 1h 1m")
+
     def test_retry_after_seconds_date_past_and_invalid(self):
         from email.utils import formatdate
         for header, expected in (("120", 120), (" 0 ", 0),
@@ -299,6 +370,23 @@ class FetchUsageTests(unittest.TestCase):
         self.cache.mkdir()
         self.urlopen.side_effect = [response(USAGE), response({"credits": []})]
         self.assertEqual(self.run_fetch()["status"], "ok")
+
+    def test_cache_write_is_fsynced_and_atomically_replaced(self):
+        snapshot = backend.build_snapshot(copy.deepcopy(USAGE), [])
+        self.cache.write_text('{"old": true}')
+        real_fsync = backend.os.fsync
+        real_replace = backend.os.replace
+        with patch.object(backend.os, "fsync", wraps=real_fsync) as fsync_mock, \
+             patch.object(backend.os, "replace", wraps=real_replace) as replace_mock:
+            backend.save_cache(snapshot)
+        fsync_mock.assert_called_once()
+        replace_mock.assert_called_once()
+        temporary, destination = replace_mock.call_args.args
+        self.assertEqual(Path(temporary).parent, self.cache.parent)
+        self.assertNotEqual(Path(temporary), self.cache)
+        self.assertEqual(Path(destination), self.cache)
+        self.assertFalse(Path(temporary).exists())
+        self.assertEqual(json.loads(self.cache.read_text()), snapshot)
 
     def test_unexpected_failure_is_json(self):
         with patch.object(backend, "load_cache", side_effect=RuntimeError("unexpected")):
