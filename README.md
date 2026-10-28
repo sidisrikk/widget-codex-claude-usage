@@ -7,6 +7,7 @@ A native KDE Plasma 5.27 widget that shows two providers side by side:
 
 <p align="center">
   <img src="contents/icons/codex.png" alt="Codex Usage Icon" width="96" height="96" />
+  <img src="contents/icons/claude.svg" alt="Claude Usage Icon" width="96" height="96" />
 </p>
 
 ## Features

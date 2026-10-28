@@ -15,7 +15,7 @@ Item {
     readonly property var claude: claudeUsage
     readonly property var providers: [codexUsage, claudeUsage]
 
-    Plasmoid.icon: Qt.resolvedUrl("../icons/codex.png")
+    Plasmoid.icon: Qt.resolvedUrl("../icons/codex-claude.png")
     Plasmoid.toolTipMainText: i18n("Codex & Claude Usage")
     Plasmoid.toolTipSubText: providers.map(providerToolTip).join("\n\n")
 

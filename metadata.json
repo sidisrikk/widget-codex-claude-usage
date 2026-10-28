@@ -10,7 +10,7 @@
             "Plasma/Applet"
         ],
         "Version": "1.1",
-        "Website": "https://github.com/sidisrikk/widget-codex-usage"
+        "Website": "https://github.com/sidisrikk/widget-codex-claude-usage"
     },
     "X-Plasma-API": "declarativeappletscript",
     "X-Plasma-MainScript": "ui/main.qml"
