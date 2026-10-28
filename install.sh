@@ -6,12 +6,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TARGET_DIR="${HOME}/.local/share/plasma/plasmoids/${APPLET_ID}"
 
 echo "=========================================="
-echo "Installing/Updating Codex Weekly Usage Widget"
+echo "Installing/Updating Codex & Claude Usage Widget"
 echo "=========================================="
 echo "Source: ${SCRIPT_DIR}"
 
-# 1. Ensure fetcher script is executable
-chmod +x "${SCRIPT_DIR}/contents/scripts/fetch_usage.py"
+# 1. Ensure fetcher scripts are executable
+chmod +x "${SCRIPT_DIR}/contents/scripts/fetch_usage.py" "${SCRIPT_DIR}/contents/scripts/fetch_claude_usage.py"
 
 # 2. Register/Update with kpackagetool5 or fallback copy
 if command -v kpackagetool5 >/dev/null 2>&1; then
@@ -36,7 +36,7 @@ fi
 # Clean non-runtime dev files from installed directory and ensure script executable
 rm -rf "${TARGET_DIR}/tests" "${TARGET_DIR}/.git" "${TARGET_DIR}/AGENTS.md" \
        "${TARGET_DIR}/install.sh" "${TARGET_DIR}/uninstall.sh" 2>/dev/null || true
-chmod +x "${TARGET_DIR}/contents/scripts/fetch_usage.py" 2>/dev/null || true
+chmod +x "${TARGET_DIR}/contents/scripts/fetch_usage.py" "${TARGET_DIR}/contents/scripts/fetch_claude_usage.py" 2>/dev/null || true
 
 # 3. Clear QML bytecode cache and reload plasmashell if active
 rm -rf "${HOME}/.cache/plasmashell/qmlcache" 2>/dev/null || true
@@ -57,5 +57,5 @@ echo "   plasmawindowed ${APPLET_ID}"
 echo ""
 echo "2. Add to your KDE Panel or Desktop:"
 echo "   - Right-click panel or desktop -> 'Add Widgets...'"
-echo "   - Search for 'Codex Weekly Usage' and drag it onto your panel or desktop."
+echo "   - Search for 'Codex & Claude Usage' and drag it onto your panel or desktop."
 echo "=========================================="

@@ -13,7 +13,9 @@ done < <(find /repo/contents/ui /repo/contents/config -name '*.qml' -print0 | so
 # Byte-identical production QML; substitute only the backend in a disposable copy.
 mkdir -p /tmp/fixture
 cp -r /repo/contents /tmp/fixture/
-cp /opt/native/backend.py /tmp/fixture/contents/scripts/fetch_usage.py
+for script in fetch_usage.py fetch_claude_usage.py; do
+    cp /opt/native/backend.py "/tmp/fixture/contents/scripts/$script"
+done
 cp /opt/native/tst_smoke.qml /tmp/fixture/tst_smoke.qml
 while IFS= read -r -d '' qml; do
     cmp "$qml" "/tmp/fixture/${qml#/repo/}"

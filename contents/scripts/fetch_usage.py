@@ -9,14 +9,13 @@ import sys
 import os
 import json
 import time
-import urllib.request
-import urllib.error
 import ssl
 import math
-import http.client
-import tempfile
-from email.utils import parsedate_to_datetime
 from datetime import datetime, timezone
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from usage_common import (format_relative_time, parse_iso_time, parse_retry_after,  # noqa: E402,F401
+                          failure, request_json, run, write_json_atomic)
 
 CACHE_FILE = os.path.expanduser("~/.cache/codex_usage.json")
 AUTH_FILE = os.path.expanduser("~/.codex/auth.json")
@@ -72,52 +71,7 @@ def load_cache():
     return None
 
 def save_cache(data):
-    temporary_path = None
-    try:
-        cache_directory = os.path.dirname(CACHE_FILE) or "."
-        os.makedirs(cache_directory, exist_ok=True)
-        with tempfile.NamedTemporaryFile(
-                "w", encoding="utf-8", dir=cache_directory,
-                prefix=f".{os.path.basename(CACHE_FILE)}.", suffix=".tmp",
-                delete=False) as f:
-            temporary_path = f.name
-            json.dump(data, f, indent=2, allow_nan=False)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(temporary_path, CACHE_FILE)
-        temporary_path = None
-    except Exception as e:
-        if temporary_path is not None:
-            try:
-                os.unlink(temporary_path)
-            except OSError:
-                pass
-        sys.stderr.write(f"Warning: Failed to write cache: {e}\n")
-
-def format_relative_time(seconds):
-    # API durations can be fractional. Keep the user-facing countdown compact.
-    seconds = int(seconds)
-    if seconds <= 0:
-        return "now"
-    days = seconds // 86400
-    hours = (seconds % 86400) // 3600
-    mins = (seconds % 3600) // 60
-    parts = []
-    if days > 0:
-        parts.append(f"{days}d")
-    if hours > 0 or days > 0:
-        parts.append(f"{hours}h")
-    parts.append(f"{mins}m")
-    return " ".join(parts)
-
-def parse_iso_time(iso_str):
-    try:
-        # Handles 2026-10-05T04:21:09.385270Z
-        clean_iso = iso_str.replace("Z", "+00:00")
-        dt = datetime.fromisoformat(clean_iso)
-        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
-    except Exception:
-        return None
+    write_json_atomic(CACHE_FILE, data)
 
 def build_snapshot(data, credits_list):
     # Extract primary rate limit window
@@ -267,39 +221,6 @@ def build_snapshot(data, credits_list):
     return result
 
 
-def parse_retry_after(value):
-    """Return finite nonnegative seconds, or None for an invalid header."""
-    if not isinstance(value, str):
-        return None
-    value = value.strip()
-    try:
-        if value.isascii() and value.isdigit():
-            seconds = int(value)
-            return seconds if math.isfinite(seconds) else None
-        dt = parsedate_to_datetime(value)
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        return max(0, math.ceil(dt.timestamp() - time.time()))
-    except (ValueError, TypeError, OverflowError):
-        return None
-
-
-def failure(cached, status, message, retryable=False, retry_after=None):
-    result = dict(cached) if cached else {"updated_at": None, "updated_formatted": None}
-    result.update(status=status, error_message=message, cached=bool(cached),
-                  has_data=bool(cached), retryable=retryable,
-                  retry_after_seconds=retry_after, attempted_at=int(time.time()))
-    return result
-
-
-def request_json(url, headers, ctx, timeout):
-    req = urllib.request.Request(url, headers=headers, method="GET")
-    with urllib.request.urlopen(req, context=ctx, timeout=timeout) as resp:
-        data = json.loads(resp.read().decode("utf-8"))
-    json.dumps(data, allow_nan=False)
-    return data
-
-
 def fetch_result(cached):
     if not os.path.exists(AUTH_FILE):
         return failure(cached, "no_auth", "Codex credentials not found. Please run 'codex login'.")
@@ -333,35 +254,8 @@ def fetch_result(cached):
 
 
 def fetch():
-    cached = None
-    try:
-        cached = load_cache()
-        result = fetch_result(cached)
-    except urllib.error.HTTPError as e:
-        retryable = e.code in (408, 429) or 500 <= e.code <= 599
-        retry_after = parse_retry_after(e.headers.get("Retry-After")) if e.code == 429 and e.headers else None
-        message = f"HTTP Error {e.code}"
-        if e.code == 401:
-            message = "Auth token expired. Please run 'codex login'."
-        elif e.code == 403:
-            message = "Access denied. Check your Codex account and log in again."
-        status = "auth_expired" if e.code == 401 else "auth_error" if e.code == 403 else "error"
-        result = failure(cached, status,
-                         message, retryable, retry_after)
-    except (http.client.IncompleteRead, ssl.SSLEOFError):
-        result = failure(cached, "offline", "Network connection interrupted.", True)
-    except (ssl.SSLError, ssl.CertificateError):
-        result = failure(cached, "error", "TLS verification failed.")
-    except urllib.error.URLError as e:
-        permanent = (isinstance(e.reason, (ssl.SSLError, ssl.CertificateError))
-                     and not isinstance(e.reason, ssl.SSLEOFError))
-        result = failure(cached, "error" if permanent else "offline",
-                         "TLS verification failed." if permanent else "Network unreachable.", not permanent)
-    except (TimeoutError, ConnectionError, OSError):
-        result = failure(cached, "offline", "Network unreachable or timed out.", True)
-    except Exception:
-        result = failure(cached, "error", "Invalid response or unexpected fetch failure.")
-    print(json.dumps(result, allow_nan=False))
+    run(load_cache, fetch_result, "Auth token expired. Please run 'codex login'.",
+        "Access denied. Check your Codex account and log in again.")
 
 if __name__ == "__main__":
     fetch()
