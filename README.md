@@ -15,11 +15,11 @@ A native KDE Plasma 5.27 widget that shows two providers side by side:
 - **Claude limits**: One Quota/Time pair per Claude limit window (Session 5h, Weekly, and per-model weekly limits when present). Each pair's header shows its own reset countdown (e.g. `resets 3h 12m`); hover it for the local reset date.
 - **Reset Countdown**: Shows humanized remaining time (e.g. `6d 11h 47m`) and local reset timestamp (`Sun, 11 Oct 12:34`).
 - **Dynamic Color Indicator**:
-  - 🟢 **Green**: Healthy quota (> 40% remaining)
-  - 🟠 **Orange**: Moderate quota (15% - 40% remaining)
-  - 🔴 **Red**: Low quota (< 15% remaining or warning threshold)
+  - 🟢 **Green**: More than 40% remaining and above the warning threshold.
+  - 🟠 **Orange**: Above the warning threshold and at most 40% remaining, or offline.
+  - 🔴 **Red**: At or below the warning threshold (20% by default), a reached limit, or an authentication error.
 - **Dual Representation**:
-  - **Panel / Taskbar**: Two rings side by side, Codex and Claude, each with its own `% left` badge and status color. On vertical panels they are stacked. Each ring shows Claude's lowest remaining window, so the limit that will block you first. Hover for a tooltip covering both providers.
+  - **Panel / Taskbar**: Two rings side by side, Codex and Claude, each with its own percentage badge and status color. On vertical panels they are stacked. The Codex ring shows its weekly quota; the Claude ring shows its lowest remaining window. The percentage can show remaining or used quota. Hover for a tooltip covering both providers when a status needs attention.
   - **Desktop / Popup**: A Codex section (`[icon] Codex Usage`, quota/time card, reset list) above a Claude section (`[icon] Claude Usage`, one quota/time pair per window). Each section header has its own ⟳ refresh button, and its logo can also be clicked or focused and activated with Space. Each one refreshes only its own provider. Status stays right-aligned in each fixed-height header through loading, failures, and recovery.
 - **Low Footprint**: Driven directly by Plasma's event engine and Python 3 without running background Node or Electron daemons.
 - **Offline & Cache Tolerant**: Saves snapshots to `~/.cache/codex_usage.json` and `~/.cache/claude_usage.json` for instant cold starts.
