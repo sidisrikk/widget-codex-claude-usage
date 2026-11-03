@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="agyGrad" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#1a73e8"/>
+      <stop offset="50%" stop-color="#4285f4"/>
+      <stop offset="100%" stop-color="#8ab4f8"/>
+    </linearGradient>
+  </defs>
+  <!-- Stylized Antigravity inverted delta / upward orbit arrow -->
+  <g fill="url(#agyGrad)">
+    <path d="M32 6 L56 46 A4 4 0 0 1 52 52 L40 52 L32 38 L24 52 L12 52 A4 4 0 0 1 8 46 Z" />
+    <circle cx="32" cy="53" r="5" fill="#4285f4"/>
+  </g>
+</svg>

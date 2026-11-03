@@ -43,7 +43,8 @@ TestCase {
         var values = [full.width, full.height, full.Layout.preferredWidth, full.Layout.preferredHeight];
         var names = ["codexHeader", "codexTitleIcon", "codexTitle", "codexHeaderStatus", "codexRefresh", "cycleCard",
                      "quotaTrack", "timeTrack", "resetsView", "claudeSection", "claudeHeader", "claudeTitleIcon",
-                     "claudeHeaderStatus", "claudeRefresh"];
+                     "claudeHeaderStatus", "claudeRefresh", "agySection", "agyHeader", "agyTitleIcon",
+                     "agyHeaderStatus", "agyRefresh"];
         for (var i = 0; i < names.length; ++i) {
             var item = findChild(full, names[i]);
             verify(item !== null, names[i]);
@@ -88,9 +89,11 @@ TestCase {
         verify(applet !== null, component.errorString());
         verify(applet.codex.isRefreshing);
         verify(applet.claude.isRefreshing);
+        verify(applet.agy.isRefreshing);
         var source = applet.codex.activeUsageSource;
         verify(source.indexOf("fetch_usage.py") >= 0);
         verify(applet.claude.activeUsageSource.indexOf("fetch_claude_usage.py") >= 0);
+        verify(applet.agy.activeUsageSource.indexOf("fetch_agy_usage.py") >= 0);
         compare(applet.codex.refreshUsage(), false);
         compare(applet.codex.activeUsageSource, source);
         compact = applet.Plasmoid.compactRepresentation.createObject(applet, {width: 100, height: 40});
@@ -101,6 +104,7 @@ TestCase {
         full.height = Qt.binding(function() { return full.Layout.preferredHeight; });
         tryCompare(applet.codex, "isRefreshing", false, 5000);
         tryCompare(applet.claude, "isRefreshing", false, 5000);
+        tryCompare(applet.agy, "isRefreshing", false, 5000);
     }
 
     function test_states_and_bindings() {
@@ -429,11 +433,36 @@ TestCase {
         compare(claude.hasData, true);
         verify(claude.statusSummary.indexOf("Sign-in required") >= 0);
         compare(labels(full, "36% left").length, 1);
+        // Antigravity section verification
+        var agy = applet.agy;
+        tryCompare(agy, "isRefreshing", false, 5000);
+        var agyRepeater = findChild(full, "agyWindows");
+        var agyRefresh = findChild(full, "agyRefresh");
+        var agyIcon = findChild(full, "agyTitleIcon");
+        verify(agyRepeater !== null && agyRefresh !== null && agyIcon !== null);
+        compare(labels(full, "Antigravity Usage").length, 1);
+        compare(agyRepeater.count, 3);
+        compare(labels(full, "Gemini · 5h").length, 1);
+        compare(labels(full, "Gemini · Weekly").length, 1);
+        compare(labels(full, "Argon · Weekly").length, 1);
+        // Agys refresh button launches only the Antigravity backend.
+        agy.serverCooldownUntil = 0;
+        agy.clockNow = Date.now();
+        compare(agyRefresh.enabled, true);
+        mouseClick(agyRefresh);
+        verify(agy.isRefreshing);
+        verify(agy.activeUsageSource.indexOf("fetch_agy_usage.py") >= 0);
+        compare(claude.isRefreshing, false);
+        compare(codex.isRefreshing, false);
+        compare(agyRefresh.enabled, false);
+        tryCompare(agy, "isRefreshing", false, 5000);
         // The panel shows one gauge per provider.
         var gauges = named(compact, "compactGauge");
-        compare(gauges.length, 2);
+        compare(gauges.length, 3);
         compare(gauges[1].usage, claude);
         compare(gauges[1].displayPercent, compact.displayPercent(claude));
+        compare(gauges[2].usage, agy);
+        compare(gauges[2].displayPercent, compact.displayPercent(agy));
         compare(nativeDiagnostics.warnings().length, 0, nativeDiagnostics.warnings().join("\n"));
     }
 

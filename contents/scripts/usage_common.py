@@ -1,5 +1,5 @@
 """
-usage_common.py - Shared helpers for the Codex and Claude usage fetchers.
+usage_common.py - Shared helpers for the Codex, Claude and Antigravity usage fetchers.
 Stdlib only; each fetcher prints exactly one finite JSON object via run().
 """
 
@@ -42,6 +42,102 @@ def parse_iso_time(iso_str):
         return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
     except Exception:
         return None
+
+
+def number(value):
+    return not isinstance(value, bool) and isinstance(value, (int, float)) and math.isfinite(value)
+
+
+# --- Windows snapshot contract (Claude and Antigravity): one quota/time pair per window ---
+
+def valid_window(window):
+    if not isinstance(window, dict):
+        return False
+    if not all(isinstance(window.get(key), str) for key in
+               ("id", "label", "reset_in", "reset_formatted", "time_left_text")):
+        return False
+    if not all(number(window.get(key)) for key in
+               ("used_percent", "left_percent", "window_seconds", "time_left_percent")):
+        return False
+    if not all(0 <= window[key] <= 100 for key in ("used_percent", "left_percent", "time_left_percent")):
+        return False
+    if not isinstance(window.get("limit_reached"), bool) or "remaining_seconds" not in window:
+        return False
+    return window["remaining_seconds"] is None or number(window["remaining_seconds"])
+
+
+def valid_windows_snapshot(data):
+    """Match the frontend windows snapshot contract before attaching cached quota."""
+    if (not isinstance(data, dict) or data.get("has_data") is not True
+            or not isinstance(data.get("windows"), list) or not data["windows"]):
+        return False
+    if not all(isinstance(data.get(key), str) for key in ("plan", "updated_formatted")):
+        return False
+    if not all(number(data.get(key)) for key in ("used_percent", "left_percent", "updated_at")):
+        return False
+    if not all(0 <= data[key] <= 100 for key in ("used_percent", "left_percent")):
+        return False
+    if data["updated_at"] < 0 or not isinstance(data.get("limit_reached"), bool):
+        return False
+    return all(valid_window(window) for window in data["windows"])
+
+
+def format_time_left(seconds):
+    if seconds >= 86400:
+        return f"{round(seconds / 86400.0, 1)}d left"
+    if seconds >= 3600:
+        return f"{round(seconds / 3600.0, 1)}h left"
+    return f"{max(1, math.ceil(seconds / 60.0))}m left"
+
+
+def window_entry(window_id, label, window_seconds, used, reset_dt, now_utc, limit_reached=False):
+    """One quota/time pair; reset_dt=None means the window has not started (no countdown)."""
+    used = min(100.0, max(0.0, float(used)))
+    left = int(max(0, min(100, round(100 - used))))
+    reset_in, reset_formatted, time_left_text = "Not started", "--", "—"
+    remaining, time_left_pct = None, 0.0
+    if reset_dt:
+        seconds = int((reset_dt - now_utc).total_seconds())
+        reset_formatted = reset_dt.astimezone().strftime("%a, %d %b %H:%M")
+        reset_in = format_relative_time(seconds)
+        if seconds > 0:
+            remaining = seconds
+            time_left_pct = round(min(100.0, seconds * 100.0 / window_seconds), 1)
+            time_left_text = format_time_left(seconds)
+    return {
+        "id": window_id,
+        "label": label,
+        "used_percent": round(used, 1),
+        "left_percent": left,
+        "window_seconds": window_seconds,
+        "reset_in": reset_in,
+        "reset_formatted": reset_formatted,
+        "remaining_seconds": remaining,
+        "time_left_percent": time_left_pct,
+        "time_left_text": time_left_text,
+        "limit_reached": used >= 100 or bool(limit_reached),
+    }
+
+
+def windows_snapshot(windows, plan, now_ts):
+    """Top-level windows snapshot; the binding (lowest) window drives the gauge."""
+    result = {
+        "status": "ok",
+        "cached": False,
+        "has_data": True,
+        "retryable": False,
+        "retry_after_seconds": None,
+        "attempted_at": now_ts,
+        "plan": plan,
+        "used_percent": max(window["used_percent"] for window in windows),
+        "left_percent": min(window["left_percent"] for window in windows),
+        "limit_reached": any(window["limit_reached"] for window in windows),
+        "windows": windows,
+        "updated_at": now_ts,
+        "updated_formatted": datetime.fromtimestamp(now_ts).strftime("%H:%M:%S"),
+    }
+    json.dumps(result, allow_nan=False)
+    return result
 
 
 def write_json_atomic(path, data):

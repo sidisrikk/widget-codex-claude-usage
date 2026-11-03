@@ -6,7 +6,7 @@ const { execFileSync } = require('node:child_process');
 const qml = fs.readFileSync('contents/ui/UsageController.qml', 'utf8');
 const mainQml = fs.readFileSync('contents/ui/main.qml', 'utf8');
 const fullQml = fs.readFileSync('contents/ui/CodexSection.qml', 'utf8');
-const claudeQml = fs.readFileSync('contents/ui/ClaudeSection.qml', 'utf8');
+const windowsQml = fs.readFileSync('contents/ui/WindowsSection.qml', 'utf8');
 const headerQml = fs.readFileSync('contents/ui/SectionHeader.qml', 'utf8');
 const compactQml = fs.readFileSync('contents/ui/CompactRepresentation.qml', 'utf8');
 
@@ -405,33 +405,33 @@ test('Claude snapshots validate per provider and hydrate only windows', () => {
 test('Claude pairs gate placeholders, reset labels and per-window colors', () => {
     const noData = claudeHarness(); noData.startup(); noData.deliver(failure({ status: 'auth_expired', retryable: false }));
     const live = claudeHarness(); live.startup(); live.deliver(claudeSnapshot());
-    const modelExpression = claudeQml.match(/model: (claudeSection\.claude\.hasData .+)/)[1];
-    const quotaExpression = claudeQml.match(/objectName: "claudeQuotaValue"\s+text: (.+)/)[1];
-    const timeExpression = claudeQml.match(/objectName: "claudeTimeValue"\s+text: (.+)/)[1];
-    const resetExpression = claudeQml.match(/objectName: "claudeResetIn"\s+text: ([\s\S]+?)\n\s+font/)[1];
+    const modelExpression = windowsQml.match(/model: (windowsSection\.controller\.hasData .+)/)[1];
+    const quotaExpression = windowsQml.match(/objectName: windowsSection\.namePrefix \+ "QuotaValue"\s+text: (.+)/)[1];
+    const timeExpression = windowsQml.match(/objectName: windowsSection\.namePrefix \+ "TimeValue"\s+text: (.+)/)[1];
+    const resetExpression = windowsQml.match(/objectName: windowsSection\.namePrefix \+ "ResetIn"\s+text: ([\s\S]+?)\n\s+font/)[1];
     const placeholders = [{ id: 'session', label: 'Session (5h)' }, { id: 'weekly', label: 'Weekly' }];
     for (const h of [noData, live]) {
-        h.context.claudeSection = { claude: h.root, placeholderWindows: placeholders };
+        h.context.windowsSection = { controller: h.root, namePrefix: 'claude', placeholderWindows: placeholders };
         h.context.pair = { live: h.root.hasData };
     }
-    const models = evaluateBinding(claudeQml, modelExpression, noData);
+    const models = evaluateBinding(windowsQml, modelExpression, noData);
     assert.equal(models, placeholders);
     assert.equal(noData.root.needsSignIn, true);
     assert.equal(noData.root.statusSummary, 'Sign-in required');
     for (const modelData of models) {
         noData.context.modelData = modelData;
         for (const expression of [quotaExpression, timeExpression, resetExpression]) {
-            assert.equal(evaluateBinding(claudeQml, expression, noData), '—');
+            assert.equal(evaluateBinding(windowsQml, expression, noData), '—');
         }
     }
     const expected = [['36% left', '3.2h left', 'resets 3h 12m'], ['82% left', '4.3d left', 'resets 4d 6h 10m']];
-    evaluateBinding(claudeQml, modelExpression, live).forEach((modelData, index) => {
+    evaluateBinding(windowsQml, modelExpression, live).forEach((modelData, index) => {
         live.context.modelData = modelData;
         assert.deepEqual([quotaExpression, timeExpression, resetExpression]
-            .map(expression => evaluateBinding(claudeQml, expression, live)), expected[index]);
+            .map(expression => evaluateBinding(windowsQml, expression, live)), expected[index]);
     });
     live.context.modelData = claudeWindow({ reset_formatted: '--', reset_in: 'Not started' });
-    assert.equal(evaluateBinding(claudeQml, resetExpression, live), 'Not started');
+    assert.equal(evaluateBinding(windowsQml, resetExpression, live), 'Not started');
     assert.equal(live.root.colorFor(82, false), '#2ecc71');
     assert.equal(live.root.colorFor(36, false), '#f39c12');
     assert.equal(live.root.colorFor(20, false), '#e74c3c');
@@ -441,27 +441,70 @@ test('Claude pairs gate placeholders, reset labels and per-window colors', () =>
     assert.equal(noData.root.colorFor(90, false), '#e74c3c');
 });
 
+function agyHarness() {
+    const h = harness('agy'); h.root.displayName = 'Antigravity'; h.root.scriptName = 'fetch_agy_usage.py';
+    return h;
+}
+
+function agySnapshot(extra = {}) {
+    return { ...failure(), status: 'ok', retryable: false, has_data: true, plan: 'Antigravity',
+        used_percent: 40.0, left_percent: 60, limit_reached: false,
+        windows: [
+            { id: 'gemini_5h', label: 'Gemini · 5h', used_percent: 40.0, left_percent: 60,
+              window_seconds: 18000, reset_in: '3h 0m', reset_formatted: 'Wed, 28 Oct 23:40',
+              remaining_seconds: 10800, time_left_percent: 60.0, time_left_text: '3.0h left', limit_reached: false },
+            { id: 'gemini_weekly', label: 'Gemini · Weekly', used_percent: 15.0, left_percent: 85,
+              window_seconds: 604800, reset_in: '5d 0h 0m', reset_formatted: 'Sun, 01 Nov 20:00',
+              remaining_seconds: 432000, time_left_percent: 71.4, time_left_text: '5.0d left', limit_reached: false },
+            { id: 'argon_weekly', label: 'Argon · Weekly', used_percent: 5.0, left_percent: 95,
+              window_seconds: 604800, reset_in: '4d 0h 0m', reset_formatted: 'Sat, 31 Oct 20:00',
+              remaining_seconds: 345600, time_left_percent: 57.1, time_left_text: '4.0d left', limit_reached: false }
+        ],
+        updated_at: 111, updated_formatted: '12:34:56', ...extra };
+}
+
+test('Antigravity snapshots validate and hydrate windows', () => {
+    const h = agyHarness(); h.startup();
+    h.deliver(agySnapshot());
+    assert.equal(h.root.status, 'ok'); assert.equal(h.root.hasData, true);
+    assert.equal(h.root.leftPercent, 60); assert.equal(h.root.plan, 'Antigravity');
+    assert.equal(h.root.windowsList.length, 3);
+    assert.equal(h.root.windowsList[0].id, 'gemini_5h');
+    assert.equal(h.root.windowsList[1].id, 'gemini_weekly');
+    assert.equal(h.root.windowsList[2].id, 'argon_weekly');
+    assert.equal(JSON.stringify(h.root.resetsList), '[]');
+});
+
 test('main refresh action and tooltip keep providers independent', () => {
     const codex = harness(); codex.startup(); codex.deliver(snapshot());
     codex.root.refreshUsage(); codex.deliver(failure({ status: 'error', retry_after_seconds: 120 }));
     const claude = claudeHarness(); claude.startup(); claude.deliver(claudeSnapshot());
-    const main = vm.createContext({ codexUsage: codex.root, claudeUsage: claude.root,
+    const agy = agyHarness(); agy.startup(); agy.deliver(agySnapshot());
+    const main = vm.createContext({ codexUsage: codex.root, claudeUsage: claude.root, agyUsage: agy.root,
         i18n: (text, ...args) => args.reduce((result, value, index) => result.replace(`%${index + 1}`, value), text) });
     const refreshAll = vm.runInContext(`(function() {${block(mainQml.indexOf('function action_refresh'), mainQml)}})`, main);
     const toolTip = vm.runInContext(`(function(usage) {${block(mainQml.indexOf('function providerToolTip'), mainQml)}})`, main);
     const enabled = headerQml.match(/enabled: (.+)/)[1];
-    codex.context.header = { controller: codex.root }; claude.context.header = { controller: claude.root };
+    codex.context.header = { controller: codex.root };
+    claude.context.header = { controller: claude.root };
+    agy.context.header = { controller: agy.root };
     assert.equal(evaluateBinding(headerQml, enabled, codex), false);
     assert.equal(evaluateBinding(headerQml, enabled, claude), true);
+    assert.equal(evaluateBinding(headerQml, enabled, agy), true);
     refreshAll();
     assert.equal(codex.launches.length, 2); assert.equal(codex.root.isRefreshing, false);
     assert.equal(claude.launches.length, 2); assert.equal(claude.root.isRefreshing, true);
+    assert.equal(agy.launches.length, 2); assert.equal(agy.root.isRefreshing, true);
     assert.match(claude.launches[1], /fetch_claude_usage\.py/);
+    assert.match(agy.launches[1], /fetch_agy_usage\.py/);
     assert.equal(evaluateBinding(headerQml, enabled, claude), false);
+    assert.equal(evaluateBinding(headerQml, enabled, agy), false);
     claude.deliver(claudeSnapshot({ updated_at: 222 }));
+    agy.deliver(agySnapshot({ updated_at: 222 }));
     assert.match(toolTip(claude.root), /^Claude: 36% left\nSession \(5h\): 36% left · resets 3h 12m\nWeekly: 82% left/);
+    assert.match(toolTip(agy.root), /^Antigravity: 60% left\nGemini · 5h: 60% left · resets 3h 0m\nGemini · Weekly: 85% left/);
     assert.match(toolTip(codex.root), /^Codex: Showing saved quota/);
-    assert.equal(codex.root.serverCooldownSeconds, 120); assert.equal(claude.root.serverCooldownSeconds, 0);
+    assert.equal(codex.root.serverCooldownSeconds, 120); assert.equal(claude.root.serverCooldownSeconds, 0); assert.equal(agy.root.serverCooldownSeconds, 0);
 });
 
 test('synthetic Claude backend JSON passes production validation', () => {

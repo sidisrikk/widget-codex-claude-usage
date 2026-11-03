@@ -10,12 +10,11 @@ import os
 import json
 import time
 import ssl
-import math
 from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from usage_common import (format_relative_time, parse_iso_time, failure, request_json,  # noqa: E402
-                          run, write_json_atomic)
+from usage_common import (number, parse_iso_time, failure, request_json, run,  # noqa: E402
+                          valid_windows_snapshot, window_entry, windows_snapshot, write_json_atomic)
 
 CACHE_FILE = os.path.expanduser("~/.cache/claude_usage.json")
 AUTH_FILE = os.path.expanduser("~/.claude/.credentials.json")
@@ -31,40 +30,8 @@ WINDOWS = (
 )
 
 
-def number(value):
-    return not isinstance(value, bool) and isinstance(value, (int, float)) and math.isfinite(value)
-
-
-def valid_window(window):
-    if not isinstance(window, dict):
-        return False
-    if not all(isinstance(window.get(key), str) for key in
-               ("id", "label", "reset_in", "reset_formatted", "time_left_text")):
-        return False
-    if not all(number(window.get(key)) for key in
-               ("used_percent", "left_percent", "window_seconds", "time_left_percent")):
-        return False
-    if not all(0 <= window[key] <= 100 for key in ("used_percent", "left_percent", "time_left_percent")):
-        return False
-    if not isinstance(window.get("limit_reached"), bool) or "remaining_seconds" not in window:
-        return False
-    return window["remaining_seconds"] is None or number(window["remaining_seconds"])
-
-
-def valid_cached_snapshot(data):
-    """Match the frontend snapshot contract before attaching cached quota."""
-    if (not isinstance(data, dict) or data.get("has_data") is not True
-            or not isinstance(data.get("windows"), list) or not data["windows"]):
-        return False
-    if not all(isinstance(data.get(key), str) for key in ("plan", "updated_formatted")):
-        return False
-    if not all(number(data.get(key)) for key in ("used_percent", "left_percent", "updated_at")):
-        return False
-    if not all(0 <= data[key] <= 100 for key in ("used_percent", "left_percent")):
-        return False
-    if data["updated_at"] < 0 or not isinstance(data.get("limit_reached"), bool):
-        return False
-    return all(valid_window(window) for window in data["windows"])
+# Shared windows contract; the old name stays for callers and tests.
+valid_cached_snapshot = valid_windows_snapshot
 
 
 def load_cache():
@@ -84,42 +51,10 @@ def save_cache(data):
     write_json_atomic(CACHE_FILE, data)
 
 
-def format_time_left(seconds):
-    if seconds >= 86400:
-        return f"{round(seconds / 86400.0, 1)}d left"
-    if seconds >= 3600:
-        return f"{round(seconds / 3600.0, 1)}h left"
-    return f"{max(1, math.ceil(seconds / 60.0))}m left"
-
-
 def build_window(raw, window_id, label, window_seconds, now_utc):
-    used = raw["utilization"]
-    used = min(100.0, max(0.0, float(used)))
-    left = int(max(0, min(100, round(100 - used))))
-    reset_in, reset_formatted, time_left_text = "Not started", "--", "—"
-    remaining, time_left_pct = None, 0.0
     reset_dt = parse_iso_time(raw["resets_at"]) if isinstance(raw.get("resets_at"), str) else None
-    if reset_dt:
-        seconds = int((reset_dt - now_utc).total_seconds())
-        reset_formatted = reset_dt.astimezone().strftime("%a, %d %b %H:%M")
-        reset_in = format_relative_time(seconds)
-        if seconds > 0:
-            remaining = seconds
-            time_left_pct = round(min(100.0, seconds * 100.0 / window_seconds), 1)
-            time_left_text = format_time_left(seconds)
-    return {
-        "id": window_id,
-        "label": label,
-        "used_percent": round(used, 1),
-        "left_percent": left,
-        "window_seconds": window_seconds,
-        "reset_in": reset_in,
-        "reset_formatted": reset_formatted,
-        "remaining_seconds": remaining,
-        "time_left_percent": time_left_pct,
-        "time_left_text": time_left_text,
-        "limit_reached": used >= 100 or bool(raw.get("locked_reason")),
-    }
+    return window_entry(window_id, label, window_seconds, raw["utilization"], reset_dt, now_utc,
+                        bool(raw.get("locked_reason")))
 
 
 def build_snapshot(data, plan):
@@ -134,24 +69,7 @@ def build_snapshot(data, plan):
     if not any(window["id"] in ("session", "weekly") for window in windows):
         raise ValueError("No session or weekly usage window")
 
-    now_ts = int(time.time())
-    result = {
-        "status": "ok",
-        "cached": False,
-        "has_data": True,
-        "retryable": False,
-        "retry_after_seconds": None,
-        "attempted_at": now_ts,
-        "plan": plan,
-        "used_percent": max(window["used_percent"] for window in windows),
-        "left_percent": min(window["left_percent"] for window in windows),
-        "limit_reached": any(window["limit_reached"] for window in windows),
-        "windows": windows,
-        "updated_at": now_ts,
-        "updated_formatted": datetime.fromtimestamp(now_ts).strftime("%H:%M:%S"),
-    }
-    json.dumps(result, allow_nan=False)
-    return result
+    return windows_snapshot(windows, plan, int(time.time()))
 
 
 def fetch_result(cached):

@@ -10,7 +10,8 @@ MouseArea {
     readonly property bool isVertical: Plasmoid.formFactor === PlasmaCore.Types.Vertical
     readonly property var gauges: [
         {usage: root.codex, icon: Qt.resolvedUrl("../icons/codex.png")},
-        {usage: root.claude, icon: Qt.resolvedUrl("../icons/claude.svg")}
+        {usage: root.claude, icon: Qt.resolvedUrl("../icons/claude.svg")},
+        {usage: root.agy, icon: Qt.resolvedUrl("../icons/antigravity.svg")}
     ]
     readonly property bool showNotice: root.providers.some(function(usage) {
         return usage.status !== "ok" || !usage.hasData || usage.isRefreshing;

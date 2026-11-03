@@ -2,7 +2,7 @@ import QtQuick 2.15
 import QtQuick.Layouts 1.15
 import org.kde.plasma.core 2.0 as PlasmaCore
 
-// Popup: Codex and Claude sections shown together, each with its own header and refresh.
+// Popup: Codex, Claude and Antigravity sections shown together, each with its own header and refresh.
 Item {
     id: fullRoot
 
@@ -30,8 +30,36 @@ Item {
             color: Qt.rgba(1, 1, 1, 0.15)
         }
 
-        ClaudeSection {
+        WindowsSection {
             objectName: "claudeSection"
+            namePrefix: "claude"
+            controller: root.claude
+            iconSource: Qt.resolvedUrl("../icons/claude.svg")
+            title: i18n("Claude Usage")
+            placeholderWindows: [
+                {id: "session", label: i18n("Session (5h)")},
+                {id: "weekly", label: i18n("Weekly")}
+            ]
+        }
+
+        Rectangle {
+            objectName: "agyDivider"
+            Layout.fillWidth: true
+            height: 1
+            color: Qt.rgba(1, 1, 1, 0.15)
+        }
+
+        WindowsSection {
+            objectName: "agySection"
+            namePrefix: "agy"
+            controller: root.agy
+            iconSource: Qt.resolvedUrl("../icons/antigravity.svg")
+            title: i18n("Antigravity Usage")
+            placeholderWindows: [
+                {id: "gemini_5h", label: i18n("Gemini · 5h")},
+                {id: "gemini_weekly", label: i18n("Gemini · Weekly")},
+                {id: "argon_weekly", label: i18n("Argon · Weekly")}
+            ]
         }
     }
 }

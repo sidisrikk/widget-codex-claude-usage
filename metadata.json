@@ -1,10 +1,10 @@
 {
     "KPlugin": {
-        "Description": "Displays Codex weekly quota and Claude session/weekly limits side by side",
+        "Description": "Displays Codex weekly quota, Claude limits, and Antigravity Gemini/Argon usage side by side",
         "Icon": "utilities-system-monitor",
         "Id": "org.kde.plasma.codexusage",
         "License": "MIT",
-        "Name": "Codex & Claude Usage",
+        "Name": "Codex, Claude & Antigravity Usage",
         "Category": "Utilities",
         "ServiceTypes": [
             "Plasma/Applet"

@@ -6,7 +6,7 @@
 
 ## OVERVIEW
 
-KDE Plasma 5.27 applet `org.kde.plasma.codexusage` (displayed as "Codex & Claude Usage") shows Codex/ChatGPT weekly quota and reset credits alongside Claude session and weekly limits. The two providers are independent. Python 3 fetches strict JSON; QtQuick 2.15 and Plasma/Kirigami QML own presentation and completion-based polling.
+KDE Plasma 5.27 applet `org.kde.plasma.codexusage` (displayed as "Codex, Claude & Antigravity Usage") shows Codex/ChatGPT weekly quota and reset credits alongside Claude session/weekly limits and Antigravity Gemini 5h/weekly and Argon weekly quotas. The three providers are independent. Python 3 fetches strict JSON; QtQuick 2.15 and Plasma/Kirigami QML own presentation and completion-based polling.
 
 ## STRUCTURE
 
@@ -16,13 +16,16 @@ widget-codex-usage/
 │   ├── scripts/                # One-shot backends; no persistent daemon
 │   │   ├── fetch_usage.py        # Codex quota + reset credits
 │   │   ├── fetch_claude_usage.py # Claude session/weekly windows (read-only Claude Code token)
-│   │   └── usage_common.py       # Shared HTTP, retry-after, atomic cache write, failure classification
+│   │   ├── fetch_agy_usage.py    # Antigravity Gemini 5h/weekly and Argon weekly windows (via agy CLI)
+│   │   └── usage_common.py       # Shared HTTP, retry-after, atomic cache write, windows snapshot helpers
 │   ├── ui/                     # Per-provider controller, sections and two representations
+│   │   ├── WindowsSection.qml    # Reusable quota/time pairs per window (Claude, Antigravity)
 │   ├── config/                 # KConfig schema and category registration
-│   └── icons/                  # codex.png, claude.svg applet-local images
+│   └── icons/                  # codex.png, claude.svg, antigravity.svg applet-local images
 ├── tests/
 │   ├── test_fetch_usage.py     # Mocked Codex backend boundary tests
 │   ├── test_fetch_claude_usage.py # Mocked Claude backend boundary tests
+│   ├── test_fetch_agy_usage.py # Mocked Antigravity backend boundary tests
 │   ├── test_scheduler.js       # Executes production QML JavaScript in Node
 │   └── native/                 # Docker-backed Qt5/KF5 smoke and syntax lint
 ├── metadata.json              # Plasma plugin identity and main-script pointer
@@ -37,18 +40,19 @@ widget-codex-usage/
 |------|----------|-------|
 | Codex auth, HTTP, cache, payload | `contents/scripts/fetch_usage.py` | Stdlib only; quota required, credit request optional; validates 0..100% ranges and positive durations; delegates atomic write and format to usage_common.py |
 | Claude auth, HTTP, cache, windows | `contents/scripts/fetch_claude_usage.py` | Reads `~/.claude/.credentials.json` only; expired token → `auth_expired` without request; validates 0..100% and strict boolean `has_data` |
-| Shared fetch helpers | `contents/scripts/usage_common.py` | `run()` classifies failures (401 → `auth_expired`, 403 → `auth_error`) and prints one JSON object; `write_json_atomic()` fsyncs and replaces caches; integer `format_relative_time()` |
+| Antigravity execution, cache, windows | `contents/scripts/fetch_agy_usage.py` | Runs `agy -p /usage --output-format json`; filters strictly to `gemini-5h`, `gemini-weekly`, and `gemini-argon*`; ignores third-party Claude/GPT buckets |
+| Shared fetch helpers | `contents/scripts/usage_common.py` | `run()` classifies failures (401 → `auth_expired`, 403 → `auth_error`) and prints one JSON object; `write_json_atomic()` fsyncs and replaces caches; windows contract validators and builders |
 | State, retries, response validation | `contents/ui/UsageController.qml` | One instance per provider; owns executable source, `shellQuote` (URL-decoded, apostrophe-safe), deadlines, snapshot age, `colorFor` |
-| Provider wiring, tooltip, refresh action | `contents/ui/main.qml` | Exposes `root.codex`, `root.claude`, `root.providers` |
+| Provider wiring, tooltip, refresh action | `contents/ui/main.qml` | Exposes `root.codex`, `root.claude`, `root.agy`, `root.providers` |
 | Panel gauges and percentages | `contents/ui/CompactRepresentation.qml`, `contents/ui/UsageRing.qml` | One ring per provider; horizontal/vertical layouts; hides unavailable quota |
-| Popup layout | `contents/ui/FullRepresentation.qml` | Stacks `CodexSection` and `ClaudeSection` |
-| Section header, status, refresh buttons | `contents/ui/SectionHeader.qml` | Fixed height; logo + ⟳ refresh only this provider; `objectName`s prefixed `codex`/`claude` |
+| Popup layout | `contents/ui/FullRepresentation.qml` | Stacks `CodexSection`, Claude `WindowsSection`, and Antigravity `WindowsSection` |
+| Section header, status, refresh buttons | `contents/ui/SectionHeader.qml` | Fixed height; logo + ⟳ refresh only this provider; `objectName`s prefixed `codex`/`claude`/`agy` |
 | Codex quota/time card and resets | `contents/ui/CodexSection.qml` | All resets visible |
-| Claude quota/time pairs | `contents/ui/ClaudeSection.qml` | One pair per window with its reset countdown; placeholder Session/Weekly pairs without data |
+| Windows quota/time pairs | `contents/ui/WindowsSection.qml` | Parameterized by controller, title, namePrefix, iconSource, placeholders |
 | Settings | `contents/ui/configGeneral.qml`, `contents/config/main.xml` | Keep `cfg_*` aliases and schema names aligned |
 | Settings category | `contents/config/config.qml` | Registers `configGeneral.qml` as General |
 | Plugin entry and packaging | `metadata.json`, `install.sh` | `X-Plasma-MainScript` is `ui/main.qml` |
-| Fast regressions | `tests/test_fetch_usage.py`, `tests/test_fetch_claude_usage.py`, `tests/test_scheduler.js` | Mocked HTTP/time, fsync/atomic replace, strict validation and production-function VM |
+| Fast regressions | `tests/test_fetch_usage.py`, `tests/test_fetch_claude_usage.py`, `tests/test_fetch_agy_usage.py`, `tests/test_scheduler.js` | Mocked HTTP/subproc/time, fsync/atomic replace, strict validation and production-function VM |
 | Native runtime regressions | `tests/native/check.sh`, `tests/native/tst_smoke.qml` | Real Qt5/KF5 modules; disposable production copy |
 | Native dependencies and shell fixture | `tests/native/Dockerfile`, `tests/native/runner.cpp` | Executable data engine needs `plasma-workspace` |
 | Qt5 tool/runtime validation | `tests/native/preflight.sh`, `tests/native/test-preflight.sh` | Linkage, runtime-major checks and negative probes |
@@ -93,7 +97,9 @@ Python definitions/imports were checked with AST search; JavaScript symbols/refe
 - Never turn missing quota into a displayed 100% balance; `hasData` gates quota content.
 - Never let optional reset-credit failures invalidate an otherwise successful quota request.
 - Never refresh, rotate or write Claude Code credentials; Claude Code owns token renewal.
-- Never couple providers: one provider's request, backoff or cooldown must not block the other's refresh.
+- Never read or refresh Antigravity (agy) Google credentials; agy owns its sign-in.
+- Never include third-party (Claude/GPT) buckets in the Antigravity snapshot.
+- Never couple providers: one provider's request, backoff or cooldown must not block another's refresh.
 - Never write cache files in place without atomic fsync and replace (`write_json_atomic`).
 - Never evaluate cache `has_data` with loose truthiness; enforce `has_data is True`.
 - Never accept unconstrained percentages outside 0..100 in quota payloads or cache validation.

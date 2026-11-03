@@ -172,7 +172,7 @@ Item {
         return true;
     }
 
-    function validClaudeSnapshot(data) {
+    function validWindowsSnapshot(data) {
         if (typeof data.plan !== "string" || typeof data.limit_reached !== "boolean"
                 || !finiteNumber(data.used_percent) || !finiteNumber(data.left_percent)
                 || !finiteNumber(data.updated_at) || data.updated_at < 0
@@ -198,7 +198,7 @@ Item {
     }
 
     function validSnapshot(data) {
-        return controller.provider === "claude" ? validClaudeSnapshot(data) : validCodexSnapshot(data);
+        return controller.provider === "codex" ? validCodexSnapshot(data) : validWindowsSnapshot(data);
     }
 
     function parseUsageOutput(raw) {
@@ -231,7 +231,7 @@ Item {
                 controller.usedPercent = data.used_percent;
                 controller.leftPercent = data.left_percent;
                 controller.limitReached = data.limit_reached;
-                if (controller.provider === "claude") {
+                if (controller.provider !== "codex") {
                     controller.windowsList = data.windows;
                 } else {
                     controller.cycleElapsedPercent = data.cycle_elapsed_percent;
