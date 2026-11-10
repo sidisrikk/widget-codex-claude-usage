@@ -23,6 +23,15 @@ Item {
     property string resetIn: "--"
     property string resetFormatted: "--"
     property var resetsList: []
+    property bool hasSession: false
+    property int sessionUsedPercent: 0
+    property int sessionLeftPercent: 100
+    property string sessionResetIn: "--"
+    property string sessionResetFormatted: "--"
+    property real sessionTimeLeftPercent: 0.0
+    property string sessionTimeLeftText: "—"
+    property int weeklyLeftPercent: 100
+    property int weeklyUsedPercent: 0
     property var windowsList: []
     property bool allowed: true
     property bool limitReached: false
@@ -159,6 +168,24 @@ Item {
         for (var i = 0; i < numbers.length; i++) {
             if (!finiteNumber(data[numbers[i]])) return false;
         }
+        if (data.has_session !== undefined) {
+            if (typeof data.has_session !== "boolean") return false;
+            if (data.has_session) {
+                if (!finiteNumber(data.session_used_percent) || !finiteNumber(data.session_left_percent)
+                        || typeof data.session_reset_in !== "string"
+                        || typeof data.session_reset_formatted !== "string") {
+                    return false;
+                }
+                if (data.session_time_left_percent !== undefined && !finiteNumber(data.session_time_left_percent)) {
+                    return false;
+                }
+                if (data.session_time_left_text !== undefined && typeof data.session_time_left_text !== "string") {
+                    return false;
+                }
+            }
+        }
+        if (data.weekly_left_percent !== undefined && !finiteNumber(data.weekly_left_percent)) return false;
+        if (data.weekly_used_percent !== undefined && !finiteNumber(data.weekly_used_percent)) return false;
         for (var j = 0; j < data.resets.length; j++) {
             var reset = data.resets[j];
             if (!reset || typeof reset !== "object") return false;
@@ -241,6 +268,15 @@ Item {
                     controller.resetFormatted = data.reset_formatted;
                     controller.resetsList = data.resets;
                     controller.allowed = data.allowed;
+                    controller.hasSession = data.has_session === true;
+                    controller.sessionUsedPercent = data.session_used_percent !== undefined ? data.session_used_percent : 0;
+                    controller.sessionLeftPercent = data.session_left_percent !== undefined ? data.session_left_percent : 100;
+                    controller.sessionResetIn = data.session_reset_in || "--";
+                    controller.sessionResetFormatted = data.session_reset_formatted || "--";
+                    controller.sessionTimeLeftPercent = data.session_time_left_percent !== undefined ? data.session_time_left_percent : 0.0;
+                    controller.sessionTimeLeftText = data.session_time_left_text || "—";
+                    controller.weeklyLeftPercent = data.weekly_left_percent !== undefined ? data.weekly_left_percent : data.left_percent;
+                    controller.weeklyUsedPercent = data.weekly_used_percent !== undefined ? data.weekly_used_percent : data.used_percent;
                 }
                 controller.lastSuccessfulAt = data.updated_at;
                 controller.lastUpdated = data.updated_formatted;

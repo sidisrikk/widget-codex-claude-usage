@@ -357,6 +357,73 @@ test('null reset remaining_seconds is unknown, not expired', () => {
     assert.equal(vm.runInContext(expression, context), false);
 });
 
+test('Codex dual-window snapshot validates, hydrates session metrics, and drives session bindings', () => {
+    const h = harness('codex'); h.startup();
+    const dualSnapshot = {
+        ...snapshot(),
+        plan: 'Plus',
+        has_session: true,
+        session_used_percent: 5,
+        session_left_percent: 95,
+        session_reset_in: '4h 30m',
+        session_reset_formatted: 'Thu 14:00',
+        session_time_left_percent: 90.0,
+        session_time_left_text: '4.5h left',
+        weekly_used_percent: 40,
+        weekly_left_percent: 60,
+        used_percent: 40,
+        left_percent: 60,
+        resets: [
+            { id: 'session', label: 'Session (5h)', kind: 'session', countdown: '4h 30m', date: 'Thu 14:00', detail: '95%', is_urgent: false, remaining_seconds: 16200 },
+            { id: 'weekly', label: 'Weekly', kind: 'weekly', countdown: '4d', date: 'Friday', detail: '60%', is_urgent: false, remaining_seconds: 345600 }
+        ]
+    };
+    h.deliver(dualSnapshot);
+    assert.equal(h.root.hasSession, true);
+    assert.equal(h.root.sessionLeftPercent, 95);
+    assert.equal(h.root.sessionUsedPercent, 5);
+    assert.equal(h.root.sessionResetIn, '4h 30m');
+    assert.equal(h.root.weeklyLeftPercent, 60);
+    assert.equal(h.root.leftPercent, 60);
+
+    const sessionQuotaExpr = fullQml.match(/objectName: "sessionQuotaValue"\s+text: (.+)/)[1];
+    assert.equal(evaluateBinding(fullQml, sessionQuotaExpr, h), '95% left');
+    const sessionTimeExpr = fullQml.match(/objectName: "sessionTimeValue"\s+text: (.+)/)[1];
+    assert.equal(evaluateBinding(fullQml, sessionTimeExpr, h), '4.5h left');
+});
+
+test('Codex compact resets filter keeps only soonest credit and exposes extra credits in tooltip', () => {
+    const h = harness('codex'); h.startup();
+    const multiCreditSnapshot = {
+        ...snapshot(),
+        resets: [
+            { id: 'weekly', label: 'Weekly', kind: 'weekly', countdown: '4d', date: 'Friday', detail: '60%', is_urgent: false, remaining_seconds: 345600 },
+            { id: 'c1', label: 'Credit', kind: 'credit', countdown: '25d', date: 'Dec 1', detail: 'Expires', is_urgent: false, remaining_seconds: 2160000 },
+            { id: 'c2', label: 'Credit', kind: 'credit', countdown: '26d', date: 'Dec 2', detail: 'Expires', is_urgent: false, remaining_seconds: 2246400 },
+            { id: 'c3', label: 'Credit', kind: 'credit', countdown: '27d', date: 'Dec 3', detail: 'Expires', is_urgent: false, remaining_seconds: 2332800 },
+        ]
+    };
+    h.deliver(multiCreditSnapshot);
+
+    const compactExpr = block(fullQml.indexOf('readonly property var compactResets:'), fullQml);
+    const compactList = vm.runInContext(`(function() { ${compactExpr} })()`, h.context);
+    assert.equal(compactList.length, 2); // 1 weekly + 1 soonest credit
+    assert.equal(compactList[0].id, 'weekly');
+    assert.equal(compactList[1].id, 'c1');
+
+    const hiddenExpr = block(fullQml.indexOf('readonly property var hiddenCredits:'), fullQml);
+    const hiddenList = vm.runInContext(`(function() { ${hiddenExpr} })()`, h.context);
+    assert.equal(hiddenList.length, 2); // c2 and c3
+    assert.equal(hiddenList[0].id, 'c2');
+    assert.equal(hiddenList[1].id, 'c3');
+
+    // Verify label displays (+2)
+    h.context.modelData = compactList[1];
+    h.context.codexSection = { hiddenCredits: hiddenList };
+    const labelExpr = fullQml.match(/objectName: "resetLabel"\s+text: (.+)/)[1];
+    assert.equal(evaluateBinding(fullQml, labelExpr, h), 'Credit (+2)');
+});
+
 function claudeWindow(extra = {}) {
     return { id: 'weekly', label: 'Weekly', used_percent: 18, left_percent: 82, window_seconds: 604800,
         reset_in: '4d 6h 10m', reset_formatted: 'Fri, 30 Oct 20:00', remaining_seconds: 367800,

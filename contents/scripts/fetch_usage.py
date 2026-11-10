@@ -14,7 +14,7 @@ import math
 from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from usage_common import (format_relative_time, parse_iso_time, parse_retry_after,  # noqa: E402,F401
+from usage_common import (format_relative_time, format_time_left, parse_iso_time, parse_retry_after,  # noqa: E402,F401
                           failure, request_json, run, write_json_atomic)
 
 CACHE_FILE = os.path.expanduser("~/.cache/codex_usage.json")
@@ -39,6 +39,24 @@ def valid_cached_snapshot(data):
     if not all(0 <= data[key] <= 100 for key in ("used_percent", "left_percent")):
         return False
     if data["updated_at"] < 0 or not all(isinstance(data.get(key), bool) for key in ("allowed", "limit_reached")):
+        return False
+    if "has_session" in data:
+        if not isinstance(data["has_session"], bool):
+            return False
+        if data["has_session"]:
+            if not all(number(data.get(key)) for key in ("session_used_percent", "session_left_percent")):
+                return False
+            if not all(0 <= data[key] <= 100 for key in ("session_used_percent", "session_left_percent")):
+                return False
+            if not all(isinstance(data.get(key), str) for key in ("session_reset_in", "session_reset_formatted")):
+                return False
+            if "session_time_left_percent" in data and not number(data["session_time_left_percent"]):
+                return False
+            if "session_time_left_text" in data and not isinstance(data["session_time_left_text"], str):
+                return False
+    if "weekly_left_percent" in data and (not number(data["weekly_left_percent"]) or not (0 <= data["weekly_left_percent"] <= 100)):
+        return False
+    if "weekly_used_percent" in data and (not number(data["weekly_used_percent"]) or not (0 <= data["weekly_used_percent"] <= 100)):
         return False
     for reset in data["resets"]:
         if not isinstance(reset, dict) or not all(isinstance(reset.get(key), str) for key in
@@ -74,9 +92,15 @@ def save_cache(data):
     write_json_atomic(CACHE_FILE, data)
 
 def build_snapshot(data, credits_list):
-    # Extract primary rate limit window
+    # Extract candidate rate limit windows (primary and optional secondary)
     rate_limit = data.get("rate_limit", {})
-    primary = rate_limit.get("primary_window", {}) or {}
+    candidates = []
+    for key in ("primary_window", "secondary_window"):
+        w = rate_limit.get(key)
+        if isinstance(w, dict) and "used_percent" in w:
+            candidates.append(w)
+    if not candidates:
+        raise ValueError("No rate limit window found")
 
     plan = data.get("plan_type", "Standard")
     allowed = rate_limit.get("allowed", True)
@@ -84,38 +108,111 @@ def build_snapshot(data, credits_list):
     if not isinstance(plan, str) or not isinstance(allowed, bool) or not isinstance(limit_reached, bool):
         raise ValueError("Invalid quota metadata")
 
-    used_pct = primary["used_percent"]
-    reset_at = primary.get("reset_at")
-    reset_seconds = primary.get("reset_after_seconds", 0)
-    limit_window = primary.get("limit_window_seconds", 604800)
-    for value in (used_pct, reset_seconds, limit_window):
+    # Classify candidate windows dynamically by limit_window_seconds
+    session_window = None
+    weekly_window = None
+    for w in candidates:
+        win_sec = w.get("limit_window_seconds", 604800)
+        if win_sec <= 21600:
+            if session_window is None:
+                session_window = w
+        else:
+            if weekly_window is None:
+                weekly_window = w
+
+    if weekly_window is None and session_window is None:
+        raise ValueError("Invalid rate limit windows")
+    if weekly_window is None and len(candidates) == 1:
+        weekly_window = session_window
+        session_window = None
+
+    # Weekly window parsing
+    weekly_used_pct = weekly_window["used_percent"]
+    weekly_reset_at = weekly_window.get("reset_at")
+    weekly_reset_seconds = weekly_window.get("reset_after_seconds", 0)
+    weekly_limit_window = weekly_window.get("limit_window_seconds", 604800)
+    for value in (weekly_used_pct, weekly_reset_seconds, weekly_limit_window):
         if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
             raise ValueError("Invalid quota number")
-    if not 0.0 <= used_pct <= 100.0:
+    if not 0.0 <= weekly_used_pct <= 100.0:
         raise ValueError("Invalid used percentage")
-    if reset_seconds < 0 or limit_window <= 0:
+    if weekly_reset_seconds < 0 or weekly_limit_window <= 0:
         raise ValueError("Invalid quota duration")
-    left_pct = 100 - used_pct
+    weekly_left_pct = 100 - weekly_used_pct
 
     # 7-day cycle calculations
-    elapsed_seconds = max(0, limit_window - reset_seconds)
-    cycle_elapsed_pct = min(100.0, max(0.0, (elapsed_seconds / float(limit_window)) * 100.0)) if limit_window > 0 else 0
+    elapsed_seconds = max(0, weekly_limit_window - weekly_reset_seconds)
+    cycle_elapsed_pct = min(100.0, max(0.0, (elapsed_seconds / float(weekly_limit_window)) * 100.0)) if weekly_limit_window > 0 else 0
     elapsed_days = round(elapsed_seconds / 86400.0, 1)
-    remaining_days = round(reset_seconds / 86400.0, 1)
+    remaining_days = round(weekly_reset_seconds / 86400.0, 1)
 
     # Weekly reset format
     reset_formatted = "--"
-    if reset_at:
+    if weekly_reset_at:
         try:
-            dt = datetime.fromtimestamp(reset_at, tz=timezone.utc).astimezone()
+            dt = datetime.fromtimestamp(weekly_reset_at, tz=timezone.utc).astimezone()
             reset_formatted = dt.strftime("%a, %d %b %H:%M")
         except Exception:
             pass
 
-    reset_in_str = format_relative_time(reset_seconds) if reset_seconds else "--"
+    reset_in_str = format_relative_time(weekly_reset_seconds) if weekly_reset_seconds else "--"
+
+    # Optional 5-hour session window parsing
+    has_session = session_window is not None
+    session_used_pct = 0
+    session_left_pct = 100
+    session_reset_in_str = "--"
+    session_reset_formatted = "--"
+    session_time_left_pct = 0.0
+    session_time_left_text = "—"
+    session_reset_seconds = 0
+
+    if has_session:
+        session_used_pct = session_window["used_percent"]
+        session_reset_at = session_window.get("reset_at")
+        session_reset_seconds = session_window.get("reset_after_seconds", 0)
+        session_limit_window = session_window.get("limit_window_seconds", 18000)
+        for value in (session_used_pct, session_reset_seconds, session_limit_window):
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+                raise ValueError("Invalid session quota number")
+        if not 0.0 <= session_used_pct <= 100.0:
+            raise ValueError("Invalid session used percentage")
+        if session_reset_seconds < 0 or session_limit_window <= 0:
+            raise ValueError("Invalid session quota duration")
+        session_left_pct = 100 - session_used_pct
+        if session_reset_at:
+            try:
+                s_dt = datetime.fromtimestamp(session_reset_at, tz=timezone.utc).astimezone()
+                session_reset_formatted = s_dt.strftime("%a, %d %b %H:%M")
+            except Exception:
+                pass
+        session_reset_in_str = format_relative_time(session_reset_seconds) if session_reset_seconds else "--"
+        if session_reset_seconds > 0 and session_limit_window > 0:
+            session_time_left_pct = round(min(100.0, session_reset_seconds * 100.0 / float(session_limit_window)), 1)
+            session_time_left_text = format_time_left(session_reset_seconds)
+
+    # Top-level used/left tracks the bottleneck window
+    if has_session:
+        left_pct = min(session_left_pct, weekly_left_pct)
+        used_pct = max(session_used_pct, weekly_used_pct)
+    else:
+        left_pct = weekly_left_pct
+        used_pct = weekly_used_pct
 
     # Enumerate all resets
     resets = []
+
+    if has_session:
+        resets.append({
+            "id": "reset_session",
+            "label": "Session (5h)",
+            "kind": "session",
+            "countdown": session_reset_in_str,
+            "date": session_reset_formatted,
+            "detail": f"{session_left_pct}% quota left",
+            "is_urgent": session_left_pct < 20,
+            "remaining_seconds": session_reset_seconds if session_reset_seconds > 0 else None,
+        })
 
     # Weekly Quota Window
     resets.append({
@@ -124,9 +221,9 @@ def build_snapshot(data, credits_list):
         "kind": "weekly",
         "countdown": reset_in_str,
         "date": reset_formatted,
-        "detail": f"{left_pct}% quota left",
-        "is_urgent": left_pct < 20,
-        "remaining_seconds": reset_seconds if reset_seconds > 0 else None,
+        "detail": f"{weekly_left_pct}% quota left",
+        "is_urgent": weekly_left_pct < 20,
+        "remaining_seconds": weekly_reset_seconds if weekly_reset_seconds > 0 else None,
     })
 
     # Individual Credit Tokens
@@ -205,6 +302,15 @@ def build_snapshot(data, credits_list):
         "plan": plan,
         "used_percent": used_pct,
         "left_percent": left_pct,
+        "weekly_used_percent": weekly_used_pct,
+        "weekly_left_percent": weekly_left_pct,
+        "has_session": has_session,
+        "session_used_percent": session_used_pct,
+        "session_left_percent": session_left_pct,
+        "session_reset_in": session_reset_in_str,
+        "session_reset_formatted": session_reset_formatted,
+        "session_time_left_percent": session_time_left_pct,
+        "session_time_left_text": session_time_left_text,
         "cycle_elapsed_percent": round(cycle_elapsed_pct, 1),
         "cycle_elapsed_days": elapsed_days,
         "cycle_remaining_days": remaining_days,
@@ -212,7 +318,7 @@ def build_snapshot(data, credits_list):
         "reset_formatted": reset_formatted,
         "resets": resets,
         "allowed": allowed,
-        "limit_reached": limit_reached,
+        "limit_reached": limit_reached or (has_session and session_used_pct >= 100) or weekly_used_pct >= 100,
         "updated_at": now_ts,
         "updated_formatted": datetime.fromtimestamp(now_ts).strftime("%H:%M:%S"),
     }

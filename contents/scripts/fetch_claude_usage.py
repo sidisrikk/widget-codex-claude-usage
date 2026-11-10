@@ -66,6 +66,20 @@ def build_snapshot(data, plan):
         raw = data.get(key)
         if isinstance(raw, dict) and number(raw.get("utilization")):
             windows.append(build_window(raw, window_id, label, window_seconds, now_utc))
+    limits = data.get("limits")
+    if isinstance(limits, list):
+        for limit in limits:
+            if not isinstance(limit, dict):
+                continue
+            scope = limit.get("scope")
+            model = scope.get("model") if isinstance(scope, dict) else None
+            percent = limit.get("percent")
+            if (limit.get("kind") == "weekly_scoped" and limit.get("group") == "weekly"
+                    and isinstance(model, dict) and model.get("display_name") == "Fable"
+                    and scope.get("surface") is None and number(percent) and 0 <= percent <= 100):
+                raw = {"utilization": percent, "resets_at": limit.get("resets_at")}
+                windows.append(build_window(raw, "weekly_fable", "Weekly Fable", 7 * 86400, now_utc))
+                break
     if not any(window["id"] in ("session", "weekly") for window in windows):
         raise ValueError("No session or weekly usage window")
 

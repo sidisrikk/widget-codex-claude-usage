@@ -160,6 +160,35 @@ class FetchClaudeUsageTests(unittest.TestCase):
         self.assertEqual(result["left_percent"], 0)
         self.assertTrue(result["limit_reached"])
 
+    def test_fable_weekly_limit_uses_its_own_reset(self):
+        usage = copy.deepcopy(USAGE)
+        fable = {"kind": "weekly_scoped", "group": "weekly", "percent": 95,
+                 "resets_at": "2027-01-16T08:00:00Z", "is_active": False,
+                 "scope": {"model": {"id": None, "display_name": "Fable"}, "surface": None}}
+        usage["limits"] = [None, {**fable, "percent": 101}, fable, fable]
+        self.urlopen.side_effect = [response(usage)]
+        result = self.run_fetch()
+        self.assertEqual([w["id"] for w in result["windows"]], ["session", "weekly", "weekly_fable"])
+        window = result["windows"][-1]
+        self.assertEqual((window["label"], window["used_percent"], window["left_percent"]),
+                         ("Weekly Fable", 95, 5))
+        self.assertEqual((window["remaining_seconds"], window["reset_in"]), (86400, "1d 0h 0m"))
+        self.assertEqual(result["left_percent"], 5)
+        self.assertTrue(backend.valid_cached_snapshot(result))
+
+    def test_fable_ignores_invalid_or_other_scoped_limits(self):
+        fable = {"kind": "weekly_scoped", "group": "weekly", "percent": 2,
+                 "scope": {"model": {"display_name": "Fable"}, "surface": None}}
+        for limits in (None, {}, [None, {}, {**fable, "percent": True},
+                                {**fable, "percent": -1}, {**fable, "percent": 101},
+                                {**fable, "group": "session"},
+                                {**fable, "scope": {"model": {"display_name": "Other"}}},
+                                {**fable, "scope": {"model": {"display_name": "Fable"}, "surface": "chat"}}]):
+            with self.subTest(limits=limits):
+                usage = {**USAGE, "limits": limits}
+                snapshot = backend.build_snapshot(usage, "Pro")
+                self.assertEqual([w["id"] for w in snapshot["windows"]], ["session", "weekly"])
+
     def test_malformed_windows_are_ignored_or_permanent(self):
         for usage, ok in (
             ({**USAGE, "seven_day_opus": {"utilization": "5"}}, True),

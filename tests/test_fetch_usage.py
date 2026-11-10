@@ -412,6 +412,77 @@ class FetchUsageTests(unittest.TestCase):
         self.assertTrue(result["has_data"])
         self.assertEqual(self.cache.read_text(), before)
 
+    def test_dual_window_plus_plan_extracts_session_and_weekly_with_bottleneck(self):
+        dual_usage = {
+            "plan_type": "plus",
+            "rate_limit": {
+                "allowed": True,
+                "limit_reached": False,
+                "primary_window": {
+                    "used_percent": 3,
+                    "limit_window_seconds": 18000,
+                    "reset_after_seconds": 17500,
+                    "reset_at": NOW + 17500,
+                },
+                "secondary_window": {
+                    "used_percent": 32,
+                    "limit_window_seconds": 604800,
+                    "reset_after_seconds": 223000,
+                    "reset_at": NOW + 223000,
+                },
+            },
+            "rate_limit_reset_credits": {"available_count": 0},
+        }
+        self.urlopen.side_effect = [response(dual_usage), http_error(503)]
+        result = self.run_fetch()
+        self.assertEqual(result["status"], "ok")
+        self.assertTrue(result["has_session"])
+        self.assertEqual(result["session_used_percent"], 3)
+        self.assertEqual(result["session_left_percent"], 97)
+        self.assertEqual(result["weekly_used_percent"], 32)
+        self.assertEqual(result["weekly_left_percent"], 68)
+        self.assertEqual(result["left_percent"], 68)
+        self.assertEqual(result["used_percent"], 32)
+        labels = [r["label"] for r in result["resets"]]
+        self.assertIn("Session (5h)", labels)
+        self.assertIn("Weekly", labels)
+        self.assertEqual(result["resets"][0]["label"], "Session (5h)")
+        self.assertEqual(result["resets"][1]["label"], "Weekly")
+        self.assertTrue(backend.valid_cached_snapshot(result))
+
+    def test_cached_session_validation(self):
+        dual_usage = {
+            "plan_type": "plus",
+            "rate_limit": {
+                "allowed": True,
+                "limit_reached": False,
+                "primary_window": {
+                    "used_percent": 5,
+                    "limit_window_seconds": 18000,
+                    "reset_after_seconds": 10000,
+                    "reset_at": NOW + 10000,
+                },
+                "secondary_window": {
+                    "used_percent": 20,
+                    "limit_window_seconds": 604800,
+                    "reset_after_seconds": 200000,
+                    "reset_at": NOW + 200000,
+                },
+            },
+            "rate_limit_reset_credits": {"available_count": 0},
+        }
+        snapshot = backend.build_snapshot(dual_usage, [])
+        self.assertTrue(backend.valid_cached_snapshot(snapshot))
+        for field, value in (("has_session", "true"),
+                             ("session_used_percent", -1), ("session_used_percent", 101),
+                             ("session_left_percent", -1), ("session_left_percent", 101),
+                             ("session_reset_in", 123), ("session_reset_formatted", None),
+                             ("weekly_left_percent", 101), ("weekly_used_percent", -1)):
+            with self.subTest(field=field, value=value):
+                candidate = copy.deepcopy(snapshot)
+                candidate[field] = value
+                self.assertFalse(backend.valid_cached_snapshot(candidate))
+
 
 if __name__ == "__main__":
     unittest.main()

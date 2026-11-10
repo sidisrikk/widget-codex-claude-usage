@@ -194,12 +194,13 @@ TestCase {
             snapshot.resets = entries;
             codex.parseUsageOutput(JSON.stringify(snapshot));
             render();
-            compare(resets.count, count);
+            var expectedCount = count > 1 ? 2 : count;
+            compare(resets.count, expectedCount);
             compare(resets.interactive, false);
             verify(resets.contentHeight <= resets.height + 1);
-            compare(resets.height, codexSection.resetRowHeight * Math.max(1, count)
-                    + resets.spacing * Math.max(0, count - 1));
-            for (var row = 0; row < count; ++row) {
+            compare(resets.height, codexSection.resetRowHeight * Math.max(1, expectedCount)
+                    + resets.spacing * Math.max(0, expectedCount - 1));
+            for (var row = 0; row < expectedCount; ++row) {
                 var delegate = resets.itemAtIndex(row);
                 verify(delegate !== null, "Every reset delegate must be instantiated");
                 verify(delegate.y >= 0 && delegate.y + delegate.height <= resets.height + 1,

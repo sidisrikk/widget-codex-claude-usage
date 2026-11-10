@@ -9,11 +9,45 @@ ColumnLayout {
 
     readonly property var codex: root.codex
     readonly property color themeColor: codex.getStatusColor()
-    readonly property real resetRowHeight: Math.max(PlasmaCore.Units.gridUnit * 1.5,
-        rowMetrics.height + PlasmaCore.Units.smallSpacing * 1.5)
+    readonly property real resetRowHeight: Math.max(PlasmaCore.Units.gridUnit * 1.35,
+        rowMetrics.height + PlasmaCore.Units.smallSpacing)
+
+    readonly property var compactResets: {
+        if (!codex.hasData) {
+            return [
+                {label: i18n("Weekly Reset"), countdown: "—", kind: "placeholder"},
+                {label: i18n("No reset data yet"), countdown: "—", kind: "placeholder"}
+            ];
+        }
+        var list = codex.resetsList || [];
+        var result = [];
+        var foundCredit = false;
+        for (var i = 0; i < list.length; i++) {
+            var item = list[i];
+            if (item.kind !== "credit") {
+                result.push(item);
+            } else if (!foundCredit) {
+                foundCredit = true;
+                result.push(item);
+            }
+        }
+        return result;
+    }
+
+    readonly property var hiddenCredits: {
+        if (!codex.hasData) return [];
+        var list = codex.resetsList || [];
+        var credits = [];
+        for (var i = 0; i < list.length; i++) {
+            if (list[i].kind === "credit") {
+                credits.push(list[i]);
+            }
+        }
+        return credits.length > 1 ? credits.slice(1) : [];
+    }
 
     Layout.fillWidth: true
-    spacing: PlasmaCore.Units.mediumSpacing
+    spacing: PlasmaCore.Units.smallSpacing
 
     FontMetrics {
         id: rowMetrics
@@ -25,6 +59,184 @@ ColumnLayout {
         iconSource: Qt.resolvedUrl("../icons/codex.png")
         title: i18n("Codex Usage")
         namePrefix: "codex"
+    }
+
+    // Section header for 5 Hours Session
+    RowLayout {
+        objectName: "sessionHeaderRow"
+        visible: codex.hasSession
+        Layout.fillWidth: true
+
+        PlasmaComponents.Label {
+            text: i18n("5 Hours Session")
+            font.bold: true
+            font.pointSize: PlasmaCore.Theme.smallestFont.pointSize
+            opacity: 0.7
+            Layout.minimumWidth: 0
+            elide: Text.ElideRight
+            maximumLineCount: 1
+        }
+
+        Rectangle {
+            Layout.fillWidth: true
+            height: 1
+            color: Qt.rgba(1, 1, 1, 0.08)
+        }
+
+        PlasmaComponents.Label {
+            objectName: "sessionResetIn"
+            text: !codex.hasData ? "—"
+                : (codex.sessionResetFormatted === "--" ? i18n("Not started") : i18n("resets %1", codex.sessionResetIn))
+            font.pointSize: PlasmaCore.Theme.smallestFont.pointSize
+            opacity: 0.7
+            horizontalAlignment: Text.AlignRight
+            Layout.minimumWidth: 0
+            Layout.maximumWidth: PlasmaCore.Units.gridUnit * 7
+            elide: Text.ElideRight
+            maximumLineCount: 1
+
+            MouseArea {
+                id: sessionResetHover
+                anchors.fill: parent
+                hoverEnabled: true
+                acceptedButtons: Qt.NoButton
+            }
+
+            PlasmaComponents.ToolTip {
+                text: codex.hasData && codex.sessionResetFormatted !== "--"
+                    ? i18n("Resets: %1", codex.sessionResetFormatted) : ""
+                visible: sessionResetHover.containsMouse && text.length > 0
+            }
+        }
+    }
+
+    // 5-Hour Session Card
+    Rectangle {
+        id: sessionCard
+        objectName: "sessionCard"
+        visible: codex.hasSession
+        Layout.fillWidth: true
+        radius: 6
+        color: Qt.rgba(0, 0, 0, 0.08)
+        border.color: Qt.rgba(1, 1, 1, 0.08)
+        border.width: 1
+        implicitHeight: visible ? (sessionCol.implicitHeight + PlasmaCore.Units.smallSpacing * 2) : 0
+        Layout.preferredHeight: visible ? -1 : 0
+
+        readonly property color sessionColor: codex.colorFor(codex.sessionLeftPercent, codex.sessionLeftPercent <= 0)
+
+        ColumnLayout {
+            id: sessionCol
+            anchors.fill: parent
+            anchors.margins: PlasmaCore.Units.smallSpacing
+            spacing: PlasmaCore.Units.smallSpacing
+
+            // Row 1: Quota Remaining
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: PlasmaCore.Units.smallSpacing
+
+                PlasmaComponents.Label {
+                    text: i18n("Quota")
+                    font.bold: true
+                    font.pointSize: PlasmaCore.Theme.defaultFont.pointSize
+                    Layout.preferredWidth: PlasmaCore.Units.gridUnit * 3
+                    Layout.minimumWidth: 0
+                    Layout.maximumWidth: Layout.preferredWidth
+                    elide: Text.ElideRight
+                    Layout.alignment: Qt.AlignVCenter
+                }
+
+                Rectangle {
+                    id: sessionQuotaTrack
+                    objectName: "sessionQuotaTrack"
+                    Layout.fillWidth: true
+                    Layout.minimumWidth: 0
+                    height: 8
+                    radius: 4
+                    color: Qt.rgba(1, 1, 1, 0.12)
+                    Layout.alignment: Qt.AlignVCenter
+
+                    Rectangle {
+                        objectName: "sessionQuotaFill"
+                        anchors.left: parent.left
+                        anchors.top: parent.top
+                        anchors.bottom: parent.bottom
+                        width: codex.hasData && codex.sessionLeftPercent > 0 ? Math.max(parent.height, parent.width * (Math.min(100, codex.sessionLeftPercent) / 100.0)) : 0
+                        radius: 4
+                        color: codex.colorFor(codex.sessionLeftPercent, codex.sessionLeftPercent <= 0)
+                    }
+                }
+
+                PlasmaComponents.Label {
+                    objectName: "sessionQuotaValue"
+                    text: codex.hasData ? codex.sessionLeftPercent + "% " + i18n("left") : "—"
+                    font.bold: true
+                    font.pointSize: PlasmaCore.Theme.defaultFont.pointSize
+                    color: codex.hasData ? codex.colorFor(codex.sessionLeftPercent, codex.sessionLeftPercent <= 0) : PlasmaCore.Theme.textColor
+                    horizontalAlignment: Text.AlignRight
+                    Layout.preferredWidth: PlasmaCore.Units.gridUnit * 4.5
+                    Layout.minimumWidth: 0
+                    Layout.maximumWidth: Layout.preferredWidth
+                    elide: Text.ElideRight
+                    maximumLineCount: 1
+                    Layout.alignment: Qt.AlignVCenter
+                }
+            }
+
+            // Row 2: Time Remaining in 5h Session
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: PlasmaCore.Units.mediumSpacing
+
+                PlasmaComponents.Label {
+                    text: i18n("Time")
+                    font.bold: true
+                    font.pointSize: PlasmaCore.Theme.defaultFont.pointSize
+                    opacity: 0.85
+                    Layout.preferredWidth: PlasmaCore.Units.gridUnit * 3
+                    Layout.minimumWidth: 0
+                    Layout.maximumWidth: Layout.preferredWidth
+                    elide: Text.ElideRight
+                    Layout.alignment: Qt.AlignVCenter
+                }
+
+                Rectangle {
+                    id: sessionTimeTrack
+                    objectName: "sessionTimeTrack"
+                    Layout.fillWidth: true
+                    Layout.minimumWidth: 0
+                    height: 8
+                    radius: 4
+                    color: Qt.rgba(1, 1, 1, 0.12)
+                    Layout.alignment: Qt.AlignVCenter
+
+                    Rectangle {
+                        objectName: "sessionTimeFill"
+                        anchors.left: parent.left
+                        anchors.top: parent.top
+                        anchors.bottom: parent.bottom
+                        width: codex.hasData && codex.sessionTimeLeftPercent > 0 ? Math.max(parent.height, parent.width * (Math.min(100, codex.sessionTimeLeftPercent) / 100.0)) : 0
+                        radius: 4
+                        color: PlasmaCore.Theme.highlightColor
+                    }
+                }
+
+                PlasmaComponents.Label {
+                    objectName: "sessionTimeValue"
+                    text: codex.hasData ? codex.sessionTimeLeftText : "—"
+                    font.pointSize: PlasmaCore.Theme.defaultFont.pointSize
+                    opacity: 0.85
+                    horizontalAlignment: Text.AlignRight
+                    Layout.preferredWidth: PlasmaCore.Units.gridUnit * 4.5
+                    Layout.minimumWidth: 0
+                    Layout.maximumWidth: Layout.preferredWidth
+                    elide: Text.ElideRight
+                    maximumLineCount: 1
+                    Layout.alignment: Qt.AlignVCenter
+                }
+            }
+        }
     }
 
     // Section header for 7 Days Cycle
@@ -50,24 +262,25 @@ ColumnLayout {
 
     // 7-Day Cycle & Quota Comparison Card (Option B: Runway Remaining)
     Rectangle {
+        id: cycleCard
         objectName: "cycleCard"
         Layout.fillWidth: true
         radius: 6
         color: Qt.rgba(0, 0, 0, 0.08)
         border.color: Qt.rgba(1, 1, 1, 0.08)
         border.width: 1
-        implicitHeight: cycleCol.implicitHeight + PlasmaCore.Units.mediumSpacing * 2
+        implicitHeight: cycleCol.implicitHeight + PlasmaCore.Units.smallSpacing * 2
 
         ColumnLayout {
             id: cycleCol
             anchors.fill: parent
-            anchors.margins: PlasmaCore.Units.mediumSpacing
+            anchors.margins: PlasmaCore.Units.smallSpacing
             spacing: PlasmaCore.Units.smallSpacing
 
             // Row 1: Quota Remaining
             RowLayout {
                 Layout.fillWidth: true
-                spacing: PlasmaCore.Units.mediumSpacing
+                spacing: PlasmaCore.Units.smallSpacing
 
                 PlasmaComponents.Label {
                     text: i18n("Quota")
@@ -95,18 +308,18 @@ ColumnLayout {
                         anchors.left: parent.left
                         anchors.top: parent.top
                         anchors.bottom: parent.bottom
-                        width: codex.hasData && codex.leftPercent > 0 ? Math.max(parent.height, parent.width * (Math.min(100, codex.leftPercent) / 100.0)) : 0
+                        width: codex.hasData && codex.weeklyLeftPercent > 0 ? Math.max(parent.height, parent.width * (Math.min(100, codex.weeklyLeftPercent) / 100.0)) : 0
                         radius: 4
-                        color: codexSection.themeColor
+                        color: codex.colorFor(codex.weeklyLeftPercent, codex.weeklyLeftPercent <= 0)
                     }
                 }
 
                 PlasmaComponents.Label {
                     objectName: "quotaValue"
-                    text: codex.hasData ? codex.leftPercent + "% " + i18n("left") : "—"
+                    text: codex.hasData ? codex.weeklyLeftPercent + "% " + i18n("left") : "—"
                     font.bold: true
                     font.pointSize: PlasmaCore.Theme.defaultFont.pointSize
-                    color: codex.hasData ? codexSection.themeColor : PlasmaCore.Theme.textColor
+                    color: codex.hasData ? codex.colorFor(codex.weeklyLeftPercent, codex.weeklyLeftPercent <= 0) : PlasmaCore.Theme.textColor
                     horizontalAlignment: Text.AlignRight
                     Layout.preferredWidth: PlasmaCore.Units.gridUnit * 4.5
                     Layout.minimumWidth: 0
@@ -208,10 +421,7 @@ ColumnLayout {
         clip: true
         boundsBehavior: Flickable.StopAtBounds
         interactive: false
-        model: codex.hasData ? codex.resetsList : [
-            {label: i18n("Weekly Reset"), countdown: "—", kind: "placeholder"},
-            {label: i18n("No reset data yet"), countdown: "—", kind: "placeholder"}
-        ]
+        model: codexSection.compactResets
 
         PlasmaComponents.Label {
             anchors.centerIn: parent
@@ -248,16 +458,27 @@ ColumnLayout {
                             if (modelData.kind === "placeholder") return "";
                             var detail = modelData.label + ": " + modelData.countdown;
                             if (modelData.kind === "credit") {
+                                var creditInfo = detail;
                                 if (modelData.date === "Available") {
-                                    return detail + "\n" + (modelData.detail || i18n("Available credit"));
+                                    creditInfo += "\n" + (modelData.detail || i18n("Available credit"));
+                                } else {
+                                    var isExp = modelData.countdown === "Expired" || (typeof modelData.remaining_seconds === "number" && modelData.remaining_seconds <= 0);
+                                    if (isExp) {
+                                        creditInfo += "\n" + (modelData.date && modelData.date !== "--" ? i18n("Expired: %1", modelData.date) : i18n("Expired"));
+                                    } else {
+                                        creditInfo += "\n" + (modelData.date && modelData.date !== "--" ? i18n("Expires: %1", modelData.date) : i18n("Expires"));
+                                    }
                                 }
-                                var isExp = modelData.countdown === "Expired" || (typeof modelData.remaining_seconds === "number" && modelData.remaining_seconds <= 0);
-                                if (isExp) {
-                                    return detail + "\n" + (modelData.date && modelData.date !== "--" ? i18n("Expired: %1", modelData.date) : i18n("Expired"));
+                                if (codexSection.hiddenCredits.length > 0) {
+                                    creditInfo += "\n\n" + i18n("Additional reset credits (%1):", codexSection.hiddenCredits.length);
+                                    for (var c = 0; c < codexSection.hiddenCredits.length; c++) {
+                                        var hc = codexSection.hiddenCredits[c];
+                                        creditInfo += "\n• " + hc.countdown + " (" + (hc.date && hc.date !== "--" ? hc.date : hc.detail) + ")";
+                                    }
                                 }
-                                return detail + "\n" + (modelData.date && modelData.date !== "--" ? i18n("Expires: %1", modelData.date) : i18n("Expires"));
+                                return creditInfo;
                             }
-                            if (modelData.kind === "weekly") {
+                            if (modelData.kind === "weekly" || modelData.kind === "session") {
                                 return detail + (modelData.date && modelData.date !== "--" ? "\n" + i18n("Resets: %1", modelData.date) : "");
                             }
                             return detail + (modelData.date ? "\n" + modelData.date : "") + (modelData.detail ? "\n" + modelData.detail : "");
@@ -269,8 +490,8 @@ ColumnLayout {
                 RowLayout {
                     id: resetRow
                     anchors.fill: parent
-                    anchors.leftMargin: PlasmaCore.Units.mediumSpacing
-                    anchors.rightMargin: PlasmaCore.Units.mediumSpacing
+                    anchors.leftMargin: PlasmaCore.Units.smallSpacing * 1.5
+                    anchors.rightMargin: PlasmaCore.Units.smallSpacing * 1.5
                     spacing: PlasmaCore.Units.smallSpacing
 
                     // Status dot
@@ -281,7 +502,8 @@ ColumnLayout {
                         color: {
                             if (modelData.is_urgent) return "#e67e22";
                             if (modelData.kind === "placeholder") return PlasmaCore.Theme.disabledTextColor;
-                            if (modelData.kind === "weekly") return codexSection.themeColor;
+                            if (modelData.kind === "session") return codex.colorFor(codex.sessionLeftPercent, codex.sessionLeftPercent <= 0);
+                            if (modelData.kind === "weekly") return codex.colorFor(codex.weeklyLeftPercent, codex.weeklyLeftPercent <= 0);
                             return PlasmaCore.Theme.highlightColor;
                         }
                         Layout.alignment: Qt.AlignVCenter
@@ -290,7 +512,7 @@ ColumnLayout {
                     // Col 1: Reset Label
                     PlasmaComponents.Label {
                         objectName: "resetLabel"
-                        text: modelData.label
+                        text: (modelData.kind === "credit" && codexSection.hiddenCredits.length > 0) ? modelData.label + " (+" + codexSection.hiddenCredits.length + ")" : modelData.label
                         font.bold: true
                         font.pointSize: PlasmaCore.Theme.defaultFont.pointSize
                         Layout.alignment: Qt.AlignVCenter

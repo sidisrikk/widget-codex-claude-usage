@@ -3,7 +3,7 @@
 A native KDE Plasma 5.27 widget that shows three providers side by side:
 
 - **Codex / ChatGPT**: weekly usage percentage remaining, countdown until reset, subscription tier and available reset credits.
-- **Claude**: the 5-hour session limit and weekly limit from your Claude Code login, plus the per-model weekly limits (Sonnet, Opus) when your plan has them.
+- **Claude**: the 5-hour session limit and weekly limit from your Claude Code login, plus the per-model weekly limits (Sonnet, Opus, Fable) when your plan has them.
 - **Antigravity**: the Gemini 5-hour, Gemini weekly, and Argon weekly quotas from your local `agy` CLI. Third-party Claude and GPT models within Antigravity are ignored to avoid duplicating Claude usage.
 
 <p align="center">
