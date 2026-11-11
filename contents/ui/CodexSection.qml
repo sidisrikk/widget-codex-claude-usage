@@ -47,7 +47,7 @@ ColumnLayout {
     }
 
     Layout.fillWidth: true
-    spacing: PlasmaCore.Units.smallSpacing
+    spacing: PlasmaCore.Units.mediumSpacing
 
     FontMetrics {
         id: rowMetrics
@@ -61,55 +61,6 @@ ColumnLayout {
         namePrefix: "codex"
     }
 
-    // Section header for 5 Hours Session
-    RowLayout {
-        objectName: "sessionHeaderRow"
-        visible: codex.hasSession
-        Layout.fillWidth: true
-
-        PlasmaComponents.Label {
-            text: i18n("5 Hours Session")
-            font.bold: true
-            font.pointSize: PlasmaCore.Theme.smallestFont.pointSize
-            opacity: 0.7
-            Layout.minimumWidth: 0
-            elide: Text.ElideRight
-            maximumLineCount: 1
-        }
-
-        Rectangle {
-            Layout.fillWidth: true
-            height: 1
-            color: Qt.rgba(1, 1, 1, 0.08)
-        }
-
-        PlasmaComponents.Label {
-            objectName: "sessionResetIn"
-            text: !codex.hasData ? "—"
-                : (codex.sessionResetFormatted === "--" ? i18n("Not started") : i18n("resets %1", codex.sessionResetIn))
-            font.pointSize: PlasmaCore.Theme.smallestFont.pointSize
-            opacity: 0.7
-            horizontalAlignment: Text.AlignRight
-            Layout.minimumWidth: 0
-            Layout.maximumWidth: PlasmaCore.Units.gridUnit * 7
-            elide: Text.ElideRight
-            maximumLineCount: 1
-
-            MouseArea {
-                id: sessionResetHover
-                anchors.fill: parent
-                hoverEnabled: true
-                acceptedButtons: Qt.NoButton
-            }
-
-            PlasmaComponents.ToolTip {
-                text: codex.hasData && codex.sessionResetFormatted !== "--"
-                    ? i18n("Resets: %1", codex.sessionResetFormatted) : ""
-                visible: sessionResetHover.containsMouse && text.length > 0
-            }
-        }
-    }
-
     // 5-Hour Session Card
     Rectangle {
         id: sessionCard
@@ -120,7 +71,7 @@ ColumnLayout {
         color: Qt.rgba(0, 0, 0, 0.08)
         border.color: Qt.rgba(1, 1, 1, 0.08)
         border.width: 1
-        implicitHeight: visible ? (sessionCol.implicitHeight + PlasmaCore.Units.smallSpacing * 2) : 0
+        implicitHeight: visible ? (sessionCol.implicitHeight + PlasmaCore.Units.mediumSpacing * 2) : 0
         Layout.preferredHeight: visible ? -1 : 0
 
         readonly property color sessionColor: codex.colorFor(codex.sessionLeftPercent, codex.sessionLeftPercent <= 0)
@@ -128,19 +79,19 @@ ColumnLayout {
         ColumnLayout {
             id: sessionCol
             anchors.fill: parent
-            anchors.margins: PlasmaCore.Units.smallSpacing
+            anchors.margins: PlasmaCore.Units.mediumSpacing
             spacing: PlasmaCore.Units.smallSpacing
 
             // Row 1: Quota Remaining
             RowLayout {
                 Layout.fillWidth: true
-                spacing: PlasmaCore.Units.smallSpacing
+                spacing: PlasmaCore.Units.mediumSpacing
 
                 PlasmaComponents.Label {
-                    text: i18n("Quota")
+                    text: i18n("5h")
                     font.bold: true
                     font.pointSize: PlasmaCore.Theme.defaultFont.pointSize
-                    Layout.preferredWidth: PlasmaCore.Units.gridUnit * 3
+                    Layout.preferredWidth: PlasmaCore.Units.gridUnit * 6.6
                     Layout.minimumWidth: 0
                     Layout.maximumWidth: Layout.preferredWidth
                     elide: Text.ElideRight
@@ -189,16 +140,10 @@ ColumnLayout {
                 Layout.fillWidth: true
                 spacing: PlasmaCore.Units.mediumSpacing
 
-                PlasmaComponents.Label {
-                    text: i18n("Time")
-                    font.bold: true
-                    font.pointSize: PlasmaCore.Theme.defaultFont.pointSize
-                    opacity: 0.85
-                    Layout.preferredWidth: PlasmaCore.Units.gridUnit * 3
+                Item {
+                    Layout.preferredWidth: PlasmaCore.Units.gridUnit * 6.6
                     Layout.minimumWidth: 0
                     Layout.maximumWidth: Layout.preferredWidth
-                    elide: Text.ElideRight
-                    Layout.alignment: Qt.AlignVCenter
                 }
 
                 Rectangle {
@@ -234,29 +179,21 @@ ColumnLayout {
                     elide: Text.ElideRight
                     maximumLineCount: 1
                     Layout.alignment: Qt.AlignVCenter
+
+                    MouseArea {
+                        id: sessionResetHover
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        acceptedButtons: Qt.NoButton
+                    }
+
+                    PlasmaComponents.ToolTip {
+                        text: codex.hasData && codex.sessionResetFormatted !== "--"
+                            ? i18n("Resets: %1", codex.sessionResetFormatted) : ""
+                        visible: sessionResetHover.containsMouse && text.length > 0
+                    }
                 }
             }
-        }
-    }
-
-    // Section header for 7 Days Cycle
-    RowLayout {
-        Layout.fillWidth: true
-
-        PlasmaComponents.Label {
-            text: i18n("7 Days Cycle")
-            font.bold: true
-            font.pointSize: PlasmaCore.Theme.smallestFont.pointSize
-            opacity: 0.7
-            Layout.minimumWidth: 0
-            elide: Text.ElideRight
-            maximumLineCount: 1
-        }
-
-        Rectangle {
-            Layout.fillWidth: true
-            height: 1
-            color: Qt.rgba(1, 1, 1, 0.08)
         }
     }
 
@@ -269,24 +206,24 @@ ColumnLayout {
         color: Qt.rgba(0, 0, 0, 0.08)
         border.color: Qt.rgba(1, 1, 1, 0.08)
         border.width: 1
-        implicitHeight: cycleCol.implicitHeight + PlasmaCore.Units.smallSpacing * 2
+        implicitHeight: cycleCol.implicitHeight + PlasmaCore.Units.mediumSpacing * 2
 
         ColumnLayout {
             id: cycleCol
             anchors.fill: parent
-            anchors.margins: PlasmaCore.Units.smallSpacing
+            anchors.margins: PlasmaCore.Units.mediumSpacing
             spacing: PlasmaCore.Units.smallSpacing
 
             // Row 1: Quota Remaining
             RowLayout {
                 Layout.fillWidth: true
-                spacing: PlasmaCore.Units.smallSpacing
+                spacing: PlasmaCore.Units.mediumSpacing
 
                 PlasmaComponents.Label {
-                    text: i18n("Quota")
+                    text: i18n("Weekly")
                     font.bold: true
                     font.pointSize: PlasmaCore.Theme.defaultFont.pointSize
-                    Layout.preferredWidth: PlasmaCore.Units.gridUnit * 3
+                    Layout.preferredWidth: PlasmaCore.Units.gridUnit * 6.6
                     Layout.minimumWidth: 0
                     Layout.maximumWidth: Layout.preferredWidth
                     elide: Text.ElideRight
@@ -330,21 +267,15 @@ ColumnLayout {
                 }
             }
 
-            // Row 2: Time Remaining
+            // Row 2: Time Remaining in Weekly Cycle
             RowLayout {
                 Layout.fillWidth: true
                 spacing: PlasmaCore.Units.mediumSpacing
 
-                PlasmaComponents.Label {
-                    text: i18n("Time")
-                    font.bold: true
-                    font.pointSize: PlasmaCore.Theme.defaultFont.pointSize
-                    opacity: 0.85
-                    Layout.preferredWidth: PlasmaCore.Units.gridUnit * 3
+                Item {
+                    Layout.preferredWidth: PlasmaCore.Units.gridUnit * 6.6
                     Layout.minimumWidth: 0
                     Layout.maximumWidth: Layout.preferredWidth
-                    elide: Text.ElideRight
-                    Layout.alignment: Qt.AlignVCenter
                 }
 
                 Rectangle {
@@ -382,6 +313,19 @@ ColumnLayout {
                     elide: Text.ElideRight
                     maximumLineCount: 1
                     Layout.alignment: Qt.AlignVCenter
+
+                    MouseArea {
+                        id: cycleResetHover
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        acceptedButtons: Qt.NoButton
+                    }
+
+                    PlasmaComponents.ToolTip {
+                        text: codex.hasData && codex.cycleResetFormatted !== "--"
+                            ? i18n("Resets: %1", codex.cycleResetFormatted) : ""
+                        visible: cycleResetHover.containsMouse && text.length > 0
+                    }
                 }
             }
         }

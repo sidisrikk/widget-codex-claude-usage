@@ -17,6 +17,15 @@ ColumnLayout {
         {id: "weekly", label: i18n("Weekly")}
     ]
 
+    function formatQuotaLabel(label) {
+        if (!label) return "";
+        return label.replace(/^Session\s*\((.*?)\)$/, "$1")
+                    .replace(" · ", " ")
+                    .replace("(", "")
+                    .replace(")", "")
+                    .trim();
+    }
+
     Layout.fillWidth: true
     spacing: PlasmaCore.Units.mediumSpacing
 
@@ -43,54 +52,6 @@ ColumnLayout {
                 ? windowsSection.controller.colorFor(modelData.left_percent, modelData.limit_reached)
                 : PlasmaCore.Theme.textColor
 
-            // Pair header: label, divider and this window's reset countdown
-            RowLayout {
-                Layout.fillWidth: true
-
-                PlasmaComponents.Label {
-                    objectName: windowsSection.namePrefix + "WindowLabel"
-                    text: modelData.label
-                    font.bold: true
-                    font.pointSize: PlasmaCore.Theme.smallestFont.pointSize
-                    opacity: 0.7
-                    Layout.minimumWidth: 0
-                    elide: Text.ElideRight
-                    maximumLineCount: 1
-                }
-
-                Rectangle {
-                    Layout.fillWidth: true
-                    height: 1
-                    color: Qt.rgba(1, 1, 1, 0.08)
-                }
-
-                PlasmaComponents.Label {
-                    objectName: windowsSection.namePrefix + "ResetIn"
-                    text: !pair.live ? "—"
-                        : (modelData.reset_formatted === "--" ? i18n("Not started") : i18n("resets %1", modelData.reset_in))
-                    font.pointSize: PlasmaCore.Theme.smallestFont.pointSize
-                    opacity: 0.7
-                    horizontalAlignment: Text.AlignRight
-                    Layout.minimumWidth: 0
-                    Layout.maximumWidth: PlasmaCore.Units.gridUnit * 7
-                    elide: Text.ElideRight
-                    maximumLineCount: 1
-
-                    MouseArea {
-                        id: resetHover
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        acceptedButtons: Qt.NoButton
-                    }
-
-                    PlasmaComponents.ToolTip {
-                        text: pair.live && modelData.reset_formatted !== "--"
-                            ? i18n("Resets: %1", modelData.reset_formatted) : ""
-                        visible: resetHover.containsMouse && text.length > 0
-                    }
-                }
-            }
-
             Rectangle {
                 objectName: windowsSection.namePrefix + "Card"
                 Layout.fillWidth: true
@@ -112,10 +73,10 @@ ColumnLayout {
                         spacing: PlasmaCore.Units.mediumSpacing
 
                         PlasmaComponents.Label {
-                            text: i18n("Quota")
+                            text: windowsSection.formatQuotaLabel(modelData.label)
                             font.bold: true
                             font.pointSize: PlasmaCore.Theme.defaultFont.pointSize
-                            Layout.preferredWidth: PlasmaCore.Units.gridUnit * 3
+                            Layout.preferredWidth: PlasmaCore.Units.gridUnit * 6.6
                             Layout.minimumWidth: 0
                             Layout.maximumWidth: Layout.preferredWidth
                             elide: Text.ElideRight
@@ -163,16 +124,10 @@ ColumnLayout {
                         Layout.fillWidth: true
                         spacing: PlasmaCore.Units.mediumSpacing
 
-                        PlasmaComponents.Label {
-                            text: i18n("Time")
-                            font.bold: true
-                            font.pointSize: PlasmaCore.Theme.defaultFont.pointSize
-                            opacity: 0.85
-                            Layout.preferredWidth: PlasmaCore.Units.gridUnit * 3
+                        Item {
+                            Layout.preferredWidth: PlasmaCore.Units.gridUnit * 6.6
                             Layout.minimumWidth: 0
                             Layout.maximumWidth: Layout.preferredWidth
-                            elide: Text.ElideRight
-                            Layout.alignment: Qt.AlignVCenter
                         }
 
                         Rectangle {
@@ -207,6 +162,19 @@ ColumnLayout {
                             elide: Text.ElideRight
                             maximumLineCount: 1
                             Layout.alignment: Qt.AlignVCenter
+
+                            MouseArea {
+                                id: resetHover
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                acceptedButtons: Qt.NoButton
+                            }
+
+                            PlasmaComponents.ToolTip {
+                                text: pair.live && modelData.reset_formatted !== "--"
+                                    ? i18n("Resets: %1", modelData.reset_formatted) : ""
+                                visible: resetHover.containsMouse && text.length > 0
+                            }
                         }
                     }
                 }

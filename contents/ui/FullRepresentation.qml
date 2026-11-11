@@ -6,7 +6,7 @@ import org.kde.plasma.core 2.0 as PlasmaCore
 Item {
     id: fullRoot
 
-    Layout.minimumWidth: PlasmaCore.Units.gridUnit * 18
+    Layout.minimumWidth: PlasmaCore.Units.gridUnit * 22
     Layout.minimumHeight: mainCol.implicitHeight + PlasmaCore.Units.largeSpacing * 2
     Layout.preferredWidth: Layout.minimumWidth
     Layout.preferredHeight: Layout.minimumHeight
@@ -23,13 +23,6 @@ Item {
             objectName: "codexSection"
         }
 
-        Rectangle {
-            objectName: "sectionDivider"
-            Layout.fillWidth: true
-            height: 1
-            color: Qt.rgba(1, 1, 1, 0.15)
-        }
-
         WindowsSection {
             objectName: "claudeSection"
             namePrefix: "claude"
@@ -40,13 +33,6 @@ Item {
                 {id: "session", label: i18n("Session (5h)")},
                 {id: "weekly", label: i18n("Weekly")}
             ]
-        }
-
-        Rectangle {
-            objectName: "agyDivider"
-            Layout.fillWidth: true
-            height: 1
-            color: Qt.rgba(1, 1, 1, 0.15)
         }
 
         WindowsSection {

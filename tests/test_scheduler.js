@@ -475,30 +475,40 @@ test('Claude pairs gate placeholders, reset labels and per-window colors', () =>
     const modelExpression = windowsQml.match(/model: (windowsSection\.controller\.hasData .+)/)[1];
     const quotaExpression = windowsQml.match(/objectName: windowsSection\.namePrefix \+ "QuotaValue"\s+text: (.+)/)[1];
     const timeExpression = windowsQml.match(/objectName: windowsSection\.namePrefix \+ "TimeValue"\s+text: (.+)/)[1];
-    const resetExpression = windowsQml.match(/objectName: windowsSection\.namePrefix \+ "ResetIn"\s+text: ([\s\S]+?)\n\s+font/)[1];
     const placeholders = [{ id: 'session', label: 'Session (5h)' }, { id: 'weekly', label: 'Weekly' }];
     for (const h of [noData, live]) {
         h.context.windowsSection = { controller: h.root, namePrefix: 'claude', placeholderWindows: placeholders };
         h.context.pair = { live: h.root.hasData };
     }
+    const formatQuotaExpr = block(windowsQml.indexOf('function formatQuotaLabel(label) {'), windowsQml);
+    const formatQuota = vm.runInContext(`(function(label) { ${formatQuotaExpr} })`, vm.createContext({
+        i18n: (text, ...args) => args.reduce((result, value, index) => result.replace(`%${index + 1}`, value), text)
+    }));
+    assert.equal(formatQuota('Session (5h)'), '5h');
+    assert.equal(formatQuota('Weekly'), 'Weekly');
+    assert.equal(formatQuota('Gemini · 5h'), 'Gemini 5h');
+    assert.equal(formatQuota('Gemini · Weekly'), 'Gemini Weekly');
+    assert.equal(formatQuota('Argon · Weekly'), 'Argon Weekly');
+
     const models = evaluateBinding(windowsQml, modelExpression, noData);
     assert.equal(models, placeholders);
     assert.equal(noData.root.needsSignIn, true);
     assert.equal(noData.root.statusSummary, 'Sign-in required');
     for (const modelData of models) {
         noData.context.modelData = modelData;
-        for (const expression of [quotaExpression, timeExpression, resetExpression]) {
+        for (const expression of [quotaExpression, timeExpression]) {
             assert.equal(evaluateBinding(windowsQml, expression, noData), '—');
         }
     }
-    const expected = [['36% left', '3.2h left', 'resets 3h 12m'], ['82% left', '4.3d left', 'resets 4d 6h 10m']];
+    const expected = [['36% left', '3.2h left'], ['82% left', '4.3d left']];
     evaluateBinding(windowsQml, modelExpression, live).forEach((modelData, index) => {
         live.context.modelData = modelData;
-        assert.deepEqual([quotaExpression, timeExpression, resetExpression]
+        assert.deepEqual([quotaExpression, timeExpression]
             .map(expression => evaluateBinding(windowsQml, expression, live)), expected[index]);
     });
-    live.context.modelData = claudeWindow({ reset_formatted: '--', reset_in: 'Not started' });
-    assert.equal(evaluateBinding(windowsQml, resetExpression, live), 'Not started');
+    const tooltipExpr = windowsQml.match(/text: pair\.live && modelData\.reset_formatted !== "--"\s+\?\s+(.+?)\s+:\s+""/)[1];
+    live.context.modelData = claudeWindow({ reset_formatted: 'Fri, 30 Oct 20:00' });
+    assert.equal(evaluateBinding(windowsQml, tooltipExpr, live), 'Resets: Fri, 30 Oct 20:00');
     assert.equal(live.root.colorFor(82, false), '#2ecc71');
     assert.equal(live.root.colorFor(36, false), '#f39c12');
     assert.equal(live.root.colorFor(20, false), '#e74c3c');
